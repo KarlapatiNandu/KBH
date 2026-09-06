@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 
 /**
@@ -217,6 +218,12 @@ export default function ParticipantLogin({ onLoginSuccess }) {
         )}
       </div>
 
+      <div className="admin-login-link-container">
+        <Link to="/admin/login" className="admin-login-link">
+          Admin Login
+        </Link>
+      </div>
+
       <style>{`
         .participant-login-container {
           min-height: 100vh;
@@ -361,6 +368,26 @@ export default function ParticipantLogin({ onLoginSuccess }) {
           .participant-login-title {
             font-size: 24px;
           }
+        }
+
+        .admin-login-link-container {
+          margin-top: var(--space-xl);
+          text-align: center;
+        }
+
+        .admin-login-link {
+          font-family: 'Inter', sans-serif;
+          font-size: 14px;
+          color: var(--serene-seafoam);
+          text-decoration: none;
+          opacity: 0.7;
+          transition: opacity 0.2s ease, color 0.2s ease;
+        }
+
+        .admin-login-link:hover {
+          opacity: 1;
+          color: var(--ocean-aqua);
+          text-decoration: underline;
         }
       `}</style>
     </div>
