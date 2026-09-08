@@ -1,28 +1,78 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import QuestionConsole from './QuestionConsole';
+
+/**
+ * Module 2 — Round Control
+ *
+ * Start / end / reset each round, pick the Round 2 hot seat, and (R5) serve
+ * questions by hand through the per-round Question Console.
+ *
+ * The Round 2 hot seat is read from `round_state.active_participant_id`, so a
+ * nomination made from the Participants tab or the Live Dashboard shows up
+ * here through the same realtime subscription. (R4)
+ */
 
 export default function RoundControl() {
   const [round1, setRound1] = useState(null);
   const [round2, setRound2] = useState(null);
+  const [questions, setQuestions] = useState({ 1: [], 2: [] });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
   const [participants, setParticipants] = useState([]);
-  const [selectedParticipant, setSelectedParticipant] = useState(null);
+
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
+
+  const fetchState = useCallback(async () => {
+    const { data, error } = await supabase.from('round_state').select('*');
+    if (!error && data) {
+      setRound1(data.find((r) => r.round === 1) || null);
+      setRound2(data.find((r) => r.round === 2) || null);
+    }
+    setLoading(false);
+  }, []);
+
+  const fetchParticipants = useCallback(async () => {
+    const { data } = await supabase
+      .from('participants')
+      .select('id, roll_no, name, network_status')
+      .order('roll_no');
+    if (data) setParticipants(data);
+  }, []);
+
+  const fetchQuestions = useCallback(async () => {
+    const { data } = await supabase
+      .from('questions')
+      .select('id, round, text, base_points, order_index')
+      .order('order_index');
+    if (data) {
+      setQuestions({
+        1: data.filter((q) => q.round === 1),
+        2: data.filter((q) => q.round === 2),
+      });
+    }
+  }, []);
 
   useEffect(() => {
     fetchState();
     fetchParticipants();
+    fetchQuestions();
 
-    // Subscribe to round state changes
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel('round-control-state')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'round_state' },
         (payload) => {
-          if (payload.new.round === 1) setRound1(payload.new);
-          if (payload.new.round === 2) setRound2(payload.new);
+          // DELETE events carry no `new` row. (ISSUES 3.10)
+          const updated = payload.new;
+          if (!updated || !updated.round) return;
+          if (updated.round === 1) setRound1(updated);
+          if (updated.round === 2) setRound2(updated);
         }
       )
       .subscribe();
@@ -30,117 +80,80 @@ export default function RoundControl() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [fetchState, fetchParticipants, fetchQuestions]);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+  // The hot seat lives in round_state, so a nomination from anywhere shows here.
+  const hotSeat = participants.find((p) => p.id === round2?.active_participant_id) || null;
 
-  const fetchState = async () => {
-    setLoading(true);
-    const { data, error } = await supabase.from('round_state').select('*');
-    if (!error && data) {
-      const r1 = data.find((r) => r.round === 1);
-      const r2 = data.find((r) => r.round === 2);
-      setRound1(r1);
-      setRound2(r2);
-      
-      if (r2?.active_participant_id) {
-        fetchParticipant(r2.active_participant_id).then(setSelectedParticipant);
-      }
-    }
-    setLoading(false);
-  };
+  const startRound = async (round) => {
+    const { data, error } = await supabase.rpc('start_round', {
+      p_round: round,
+      p_active_participant_id: round === 2 ? round2?.active_participant_id ?? null : null,
+    });
 
-  const fetchParticipants = async () => {
-    const { data } = await supabase.from('participants').select('*').order('roll_no');
-    if (data) setParticipants(data);
-  };
-
-  const fetchParticipant = async (id) => {
-    const { data } = await supabase.from('participants').select('*').eq('id', id).single();
-    return data;
-  };
-
-  const setRoundStatus = async (round, status, extra = {}) => {
-    let error = null;
-
-    if (status === 'active') {
-      const result = await supabase.rpc('start_round', {
-        p_round: round,
-        p_active_participant_id: extra.active_participant_id || null,
-      });
-      error = result.error;
-    } else {
-      const updates = { status, ...extra };
-      const result = await supabase
-        .from('round_state')
-        .update(updates)
-        .eq('round', round);
-      error = result.error;
-    }
-
-    if (error) {
-      showToast(`Failed to update Round ${round}`, 'error');
-    } else {
-      showToast(`Round ${round} set to ${status}`);
-      fetchState(); // Fallback if realtime is slow
-    }
-  };
-
-  const startRound2 = () => {
-    if (!selectedParticipant) {
-      showToast('Select a participant first', 'error');
+    if (error || !data?.success) {
+      showToast(error?.message || data?.error || `Failed to start Round ${round}`, 'error');
       return;
     }
-    setRoundStatus(2, 'active', { active_participant_id: selectedParticipant.id });
+
+    showToast(`Round ${round} started`);
+    fetchState();
   };
 
-  const renderRoundCard = (roundObj, roundNum, title, controls) => {
-    if (!roundObj) return null;
+  const endRound = async (round) => {
+    const { error } = await supabase
+      .from('round_state')
+      .update({ status: 'completed' })
+      .eq('round', round);
 
-    const isActive = roundObj.status === 'active';
-    const isCompleted = roundObj.status === 'completed';
+    if (error) {
+      showToast(`Failed to end Round ${round}`, 'error');
+      return;
+    }
 
-    return (
-      <div className={`rc-card card ${isActive ? 'rc-card--active' : 'card--solid'}`}>
-        <div className="rc-header">
-          <div>
-            <h3>{title}</h3>
-            <span className={`badge badge--${roundObj.status}`}>
-              {roundObj.status.toUpperCase()}
-            </span>
-          </div>
-          <div className="rc-meta">
-            {isActive && (
-              <span className="rc-question-meta">
-                Question {roundObj.current_question_index + 1}
-              </span>
-            )}
-          </div>
-        </div>
+    showToast(`Round ${round} ended`);
+    fetchState();
+  };
 
-        <div className="rc-body">
-          {controls}
-        </div>
+  /**
+   * Reset goes through the RPC so responses are cleared alongside the index —
+   * otherwise the UNIQUE (participant_id, question_id) constraint locks every
+   * participant out of a re-run. (ISSUES 1.3)
+   */
+  const resetRound = async (round, clearResponses) => {
+    const { data, error } = await supabase.rpc('reset_round', {
+      p_round: round,
+      p_clear_responses: clearResponses,
+    });
 
-        <div className="rc-actions">
-          {roundObj.status !== 'inactive' && (
-            <button 
-              className="btn btn-secondary btn-sm" 
-              onClick={() => {
-                if (window.confirm(`Reset Round ${roundNum} to inactive? This stops the round immediately.`)) {
-                  setRoundStatus(roundNum, 'inactive');
-                }
-              }}
-            >
-              Reset to Inactive
-            </button>
-          )}
-        </div>
-      </div>
+    if (error || !data?.success) {
+      showToast(error?.message || data?.error || `Failed to reset Round ${round}`, 'error');
+      return;
+    }
+
+    showToast(
+      clearResponses
+        ? `Round ${round} reset — ${data.cleared_responses} responses cleared`
+        : `Round ${round} reset to inactive`
     );
+    fetchState();
+  };
+
+  const nominate = async (participantId) => {
+    const { data, error } = await supabase.rpc('nominate_hotseat', {
+      p_participant_id: participantId,
+    });
+
+    if (error || !data?.success) {
+      showToast(error?.message || data?.error || 'Failed to nominate', 'error');
+      return;
+    }
+
+    showToast(
+      participantId ? `${data.roll_no} nominated for the hot seat` : 'Hot seat cleared'
+    );
+    setSearch('');
+    fetchState();
   };
 
   const filteredParticipants = participants.filter((p) => {
@@ -150,23 +163,95 @@ export default function RoundControl() {
 
   if (loading) return <div className="rc-loading">Loading round state…</div>;
 
+  const renderRoundCard = (roundObj, roundNum, title, controls) => {
+    if (!roundObj) return null;
+
+    const isActive = roundObj.status === 'active';
+
+    return (
+      <div className={`rc-card card ${isActive ? 'rc-card--active' : 'card--solid'}`}>
+        <div className="rc-header">
+          <div>
+            <h3>{title}</h3>
+            <span className={`badge badge--${roundObj.status}`}>
+              {roundObj.status.toUpperCase()}
+            </span>
+            {roundObj.manual_mode && (
+              <span className="badge badge--completed rc-mode-badge">MANUAL</span>
+            )}
+          </div>
+          <div className="rc-meta">
+            {isActive && (
+              <span className="rc-question-meta">
+                Question {(questions[roundNum].findIndex(
+                  (q) => q.order_index === roundObj.current_question_index
+                ) + 1) || '—'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="rc-body">{controls}</div>
+
+        <div className="rc-actions">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              if (window.confirm(
+                `Reset Round ${roundNum} and DELETE all its responses?\n\n` +
+                `This is what makes the round re-runnable — without it participants ` +
+                `are locked out of questions they have already answered.`
+              )) {
+                resetRound(roundNum, true);
+              }
+            }}
+          >
+            Reset &amp; clear responses
+          </button>
+          {roundObj.status !== 'inactive' && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                if (window.confirm(`Stop Round ${roundNum} but keep all responses?`)) {
+                  resetRound(roundNum, false);
+                }
+              }}
+            >
+              Stop (keep responses)
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="rc">
       <div className="rc-grid">
-        
-        {/* Round 1 */}
+
+        {/* ── Round 1 ── */}
         {renderRoundCard(round1, 1, 'Round 1: Fastest Finger First', (
           <div className="rc-control-box">
             <p className="rc-desc">
-              Synchronized round for all participants. Activating will immediately start Question 1 for everyone connected.
+              Synchronized round for all participants. Starting it puts the first
+              question live for everyone connected.
             </p>
-            <button 
+
+            <QuestionConsole
+              round={1}
+              roundState={round1}
+              questions={questions[1]}
+              onResult={showToast}
+              onChanged={fetchState}
+            />
+
+            <button
               className={`btn ${round1?.status === 'active' ? 'btn-danger' : 'btn-primary'}`}
               onClick={() => {
                 if (round1?.status === 'active') {
-                  if (window.confirm('End Round 1 early?')) setRoundStatus(1, 'completed');
-                } else {
-                  if (window.confirm('Start Round 1 now?')) setRoundStatus(1, 'active');
+                  if (window.confirm('End Round 1 early?')) endRound(1);
+                } else if (window.confirm('Start Round 1 now?')) {
+                  startRound(1);
                 }
               }}
             >
@@ -175,44 +260,58 @@ export default function RoundControl() {
           </div>
         ))}
 
-        {/* Round 2 */}
+        {/* ── Round 2 ── */}
         {renderRoundCard(round2, 2, 'Round 2: Hot Seat', (
           <div className="rc-control-box">
             <p className="rc-desc">
-              Select one participant to play Round 2. Only this participant will see active questions.
+              Nominate one participant for the hot seat. Only they see active
+              questions; everyone else gets a disabled placeholder.
             </p>
-            
+
             <div className="rc-hs-select">
-              <label className="form-label">Active Participant</label>
-              
-              {round2?.status === 'active' || round2?.status === 'completed' ? (
+              <label className="form-label">Hot seat</label>
+
+              {hotSeat ? (
                 <div className="rc-selected-player">
-                  <span className="rc-player-roll">{selectedParticipant?.roll_no}</span>
-                  <span className="rc-player-name">{selectedParticipant?.name}</span>
+                  <span className="rc-player-roll">{hotSeat.roll_no}</span>
+                  <span className="rc-player-name">{hotSeat.name || '—'}</span>
+                  {round2?.status !== 'active' && (
+                    <button
+                      className="btn-icon rc-clear-hs"
+                      title="Clear nomination"
+                      onClick={() => nominate(null)}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="rc-participant-search">
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Search participant…"
+                    placeholder="Search participant to nominate…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
-                  
+
                   {search && (
                     <div className="rc-search-results">
-                      {filteredParticipants.slice(0, 5).map(p => (
-                        <div 
-                          key={p.id} 
-                          className={`rc-search-item ${selectedParticipant?.id === p.id ? 'rc-search-item--selected' : ''}`}
-                          onClick={() => {
-                            setSelectedParticipant(p);
-                            setSearch('');
-                          }}
+                      {filteredParticipants.slice(0, 5).map((p) => (
+                        <div
+                          key={p.id}
+                          className="rc-search-item"
+                          onClick={() => nominate(p.id)}
                         >
                           <span className="rc-item-roll">{p.roll_no}</span>
-                          <span className="rc-item-name">{p.name || '—'}</span>
+                          <span
+                            className="rc-item-name"
+                            style={p.network_status === 'failed'
+                              ? { color: 'var(--danger-red)' }
+                              : undefined}
+                          >
+                            {p.name || '—'}
+                          </span>
                         </div>
                       ))}
                       {filteredParticipants.length === 0 && (
@@ -220,29 +319,28 @@ export default function RoundControl() {
                       )}
                     </div>
                   )}
-                  
-                  {selectedParticipant && !search && (
-                    <div className="rc-selected-preview">
-                      Selected: <strong>{selectedParticipant.roll_no}</strong> {selectedParticipant.name}
-                      <button className="btn-icon" onClick={() => setSelectedParticipant(null)}>✕</button>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
 
-            <button 
+            <QuestionConsole
+              round={2}
+              roundState={round2}
+              questions={questions[2]}
+              onResult={showToast}
+              onChanged={fetchState}
+            />
+
+            <button
               className={`btn ${round2?.status === 'active' ? 'btn-danger' : 'btn-primary'}`}
               onClick={() => {
                 if (round2?.status === 'active') {
-                  if (window.confirm('End Round 2 early?')) setRoundStatus(2, 'completed');
-                } else {
-                  if (window.confirm(`Start Round 2 for ${selectedParticipant?.roll_no}?`)) {
-                    startRound2();
-                  }
+                  if (window.confirm('End Round 2 early?')) endRound(2);
+                } else if (window.confirm(`Start Round 2 for ${hotSeat?.roll_no}?`)) {
+                  startRound(2);
                 }
               }}
-              disabled={round2?.status !== 'active' && !selectedParticipant}
+              disabled={round2?.status !== 'active' && !hotSeat}
             >
               {round2?.status === 'active' ? 'End Round 2' : 'Start Round 2'}
             </button>
@@ -250,9 +348,7 @@ export default function RoundControl() {
         ))}
       </div>
 
-      {toast && (
-        <div className={`toast toast--${toast.type}`}>{toast.message}</div>
-      )}
+      {toast && <div className={`toast toast--${toast.type}`}>{toast.message}</div>}
 
       <style>{`
         .rc-loading {
@@ -293,9 +389,9 @@ export default function RoundControl() {
           margin-bottom: var(--space-xs);
         }
 
-        .rc-meta {
-          text-align: right;
-        }
+        .rc-mode-badge { margin-left: 6px; }
+
+        .rc-meta { text-align: right; }
 
         .rc-question-meta {
           font-family: 'Poppins', sans-serif;
@@ -304,9 +400,7 @@ export default function RoundControl() {
           font-size: 16px;
         }
 
-        .rc-body {
-          flex: 1;
-        }
+        .rc-body { flex: 1; }
 
         .rc-desc {
           color: var(--serene-seafoam);
@@ -335,9 +429,7 @@ export default function RoundControl() {
           margin-top: var(--space-xs);
         }
 
-        .rc-participant-search input {
-          width: 100%;
-        }
+        .rc-participant-search input { width: 100%; }
 
         .rc-search-results {
           position: absolute;
@@ -362,13 +454,7 @@ export default function RoundControl() {
           border-bottom: 1px solid rgba(36,184,175,0.1);
         }
 
-        .rc-search-item:hover {
-          background: rgba(36,184,175,0.08);
-        }
-
-        .rc-search-item--selected {
-          background: rgba(36,184,175,0.15);
-        }
+        .rc-search-item:hover { background: rgba(36,184,175,0.08); }
 
         .rc-item-roll {
           font-family: 'Poppins', sans-serif;
@@ -376,26 +462,13 @@ export default function RoundControl() {
           color: var(--cloud-white);
         }
 
-        .rc-item-name {
-          color: var(--serene-seafoam);
-        }
+        .rc-item-name { color: var(--serene-seafoam); }
 
         .rc-search-empty {
           padding: 10px 14px;
           color: var(--serene-seafoam);
           font-size: 13px;
           text-align: center;
-        }
-
-        .rc-selected-preview {
-          margin-top: var(--space-sm);
-          padding: 8px 12px;
-          background: rgba(36,184,175,0.1);
-          border-radius: var(--radius-sm);
-          font-size: 14px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
         }
 
         .rc-selected-player {
@@ -421,12 +494,16 @@ export default function RoundControl() {
           font-weight: 500;
         }
 
+        .rc-clear-hs { margin-left: auto; }
+
         .rc-actions {
           margin-top: var(--space-xl);
           padding-top: var(--space-md);
           border-top: 1px solid rgba(36,184,175,0.1);
           display: flex;
+          gap: var(--space-sm);
           justify-content: flex-end;
+          flex-wrap: wrap;
         }
 
         @media (min-width: 768px) {

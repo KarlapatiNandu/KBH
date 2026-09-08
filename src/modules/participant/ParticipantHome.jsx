@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { clearStoredParticipant } from './ParticipantLogin';
+import { clearStoredParticipant } from './storage';
 
 /**
  * Module 3 — Participant Home

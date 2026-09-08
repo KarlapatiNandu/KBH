@@ -1,6 +1,23 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
+/**
+ * Module 2 — Participants
+ *
+ * CSV import plus the live roster. Two things beyond v1:
+ *   R2 — a Network column fed by the post-login check. Anyone whose check
+ *        failed has their name rendered in red so the host can spot them
+ *        before the round starts. Kept live via a realtime subscription.
+ *   R4 — Nominate sends a participant to the Round 2 hot seat without
+ *        starting the round.
+ */
+
+const NETWORK_LABELS = {
+  passed: 'Passed',
+  failed: 'Failed',
+  pending: 'Not checked',
+};
+
 export default function ParticipantImport() {
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -11,6 +28,26 @@ export default function ParticipantImport() {
 
   useEffect(() => {
     fetchParticipants();
+
+    // Network-check verdicts land while the host is watching this screen.
+    const channel = supabase
+      .channel('admin-participants')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'participants' },
+        (payload) => {
+          const updated = payload.new;
+          if (!updated || !updated.id) return; // DELETE carries no new row
+          setParticipants((prev) =>
+            prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p))
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const showToast = (message, type = 'success') => {
@@ -100,6 +137,38 @@ export default function ParticipantImport() {
       showToast('Failed to delete', 'error');
     } else {
       showToast('Participant removed');
+      fetchParticipants();
+    }
+  };
+
+  const nominateHotSeat = async (p) => {
+    if (!window.confirm(`Nominate ${p.roll_no} for the Round 2 hot seat?`)) return;
+
+    const { data, error } = await supabase.rpc('nominate_hotseat', {
+      p_participant_id: p.id,
+    });
+
+    if (error || !data?.success) {
+      showToast(error?.message || data?.error || 'Failed to nominate', 'error');
+    } else {
+      showToast(`${p.roll_no} nominated for the hot seat`);
+    }
+  };
+
+  const resetPin = async (p) => {
+    if (!window.confirm(
+      `Reset the PIN for ${p.roll_no}?\n\nThey will set a new one on their next login.`
+    )) return;
+
+    const { error } = await supabase
+      .from('participants')
+      .update({ pin_hash: null })
+      .eq('id', p.id);
+
+    if (error) {
+      showToast('Failed to reset PIN', 'error');
+    } else {
+      showToast(`PIN reset for ${p.roll_no}`);
       fetchParticipants();
     }
   };
@@ -201,33 +270,71 @@ export default function ParticipantImport() {
                   <th>#</th>
                   <th>Roll No</th>
                   <th>Name</th>
+                  <th>Network</th>
                   <th>PIN Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredParticipants.map((p, i) => (
-                  <tr key={p.id}>
-                    <td>{i + 1}</td>
-                    <td style={{ fontFamily: "'Poppins', sans-serif", fontWeight: 600 }}>{p.roll_no}</td>
-                    <td>{p.name || '—'}</td>
-                    <td>
-                      <span className={`badge ${p.pin_hash ? 'badge--active' : 'badge--pending'}`}>
-                        {p.pin_hash ? 'Claimed' : 'Unclaimed'}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        className="btn-icon"
-                        onClick={() => deleteParticipant(p.id)}
-                        title="Remove"
-                        style={{ color: 'var(--danger-red)' }}
-                      >
-                        🗑️
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredParticipants.map((p, i) => {
+                  const netFailed = p.network_status === 'failed';
+
+                  return (
+                    <tr key={p.id}>
+                      <td>{i + 1}</td>
+                      <td style={{ fontFamily: "'Poppins', sans-serif", fontWeight: 600 }}>{p.roll_no}</td>
+                      {/* R2 — a failed network check paints the name red */}
+                      <td className={netFailed ? 'pi-name--failed' : undefined}>
+                        {p.name || '—'}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge badge--${
+                            p.network_status === 'passed'
+                              ? 'active'
+                              : netFailed
+                                ? 'wrong'
+                                : 'pending'
+                          }`}
+                          title={p.network_detail || 'No check recorded yet'}
+                        >
+                          {NETWORK_LABELS[p.network_status] || 'Not checked'}
+                          {p.network_latency_ms != null && ` · ${p.network_latency_ms}ms`}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`badge ${p.pin_hash ? 'badge--active' : 'badge--pending'}`}>
+                          {p.pin_hash ? 'Claimed' : 'Unclaimed'}
+                        </span>
+                      </td>
+                      <td className="pi-actions">
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => nominateHotSeat(p)}
+                          title="Nominate for the Round 2 hot seat"
+                        >
+                          Nominate
+                        </button>
+                        <button
+                          className="btn-icon"
+                          onClick={() => resetPin(p)}
+                          title="Reset PIN"
+                          disabled={!p.pin_hash}
+                        >
+                          🔑
+                        </button>
+                        <button
+                          className="btn-icon"
+                          onClick={() => deleteParticipant(p.id)}
+                          title="Remove"
+                          style={{ color: 'var(--danger-red)' }}
+                        >
+                          🗑️
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -240,6 +347,19 @@ export default function ParticipantImport() {
       )}
 
       <style>{`
+        /* R2 — failed network check */
+        .pi-name--failed {
+          color: var(--danger-red);
+          font-weight: 600;
+        }
+
+        .pi-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          white-space: nowrap;
+        }
+
         .pi-import-section {
           padding: var(--space-lg);
           margin-bottom: var(--space-xl);

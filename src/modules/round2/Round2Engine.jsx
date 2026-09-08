@@ -12,7 +12,8 @@ import Round2Results from './Round2Results';
  * Scoped to round = 2 and active_participant_id.
  */
 
-const TRANSITION_DELAY_MS = 2500;
+const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
+const DEFAULT_DURATION_MS = 10000; // Fallback if round_state.question_duration_ms is unset
 
 export default function Round2Engine({ participant }) {
   const navigate = useNavigate();
@@ -25,6 +26,14 @@ export default function Round2Engine({ participant }) {
   const [lastResult, setLastResult] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
   const [error, setError] = useState(null);
+
+  // R6 - client-side timing. `questionAnchor` is the local wall-clock moment
+  // this client actually rendered the live question; both the countdown and
+  // the reported response time measure from it.
+  const [questionAnchor, setQuestionAnchor] = useState(null);
+  const anchorMsRef = useRef(null);
+  const anchorKeyRef = useRef(null);
+  const advanceTimeoutRef = useRef(null);
 
   const answeredQuestionsRef = useRef(new Set());
 
@@ -94,7 +103,7 @@ export default function Round2Engine({ participant }) {
     };
   }, []);
 
-  // Derive game phase
+  // ─── Derive game phase from round_state ──────────────────────
   useEffect(() => {
     if (!questionsLoaded || !roundState) {
       setGamePhase('loading');
@@ -111,52 +120,78 @@ export default function Round2Engine({ participant }) {
       return;
     }
 
-    if (roundState.status === 'active') {
-      const currentQ = questions[roundState.current_question_index];
-      if (!currentQ) {
-        setGamePhase('completed');
-        return;
-      }
+    if (roundState.status !== 'active') return;
 
-      if (answeredQuestionsRef.current.has(currentQ.id)) {
-        setGamePhase('active');
-        return;
-      }
+    // Resolve the live question by order_index - the same key the server
+    // matches on. Array position breaks as soon as order_index has a gap, or
+    // the host serves questions out of order. (ISSUES 1.4 / R5)
+    const currentQ = questions.find(
+      (q) => q.order_index === roundState.current_question_index
+    );
 
-      checkExistingResponse(currentQ.id).then((existing) => {
-        if (existing) {
-          answeredQuestionsRef.current.add(currentQ.id);
-          setSelectedOption(existing.selected_option);
-          setLastResult({
-            is_correct: existing.is_correct,
-            points_awarded: existing.points_awarded,
-            response_time_ms: existing.response_time_ms,
-          });
-          setHasAnswered(true);
-        } else {
-          setSelectedOption(null);
-          setLastResult(null);
-          setHasAnswered(false);
-        }
-        setGamePhase('active');
-      });
+    if (!currentQ) {
+      // The host may be between questions - hold rather than declaring the
+      // round over, which would strand everyone on the results screen.
+      setGamePhase('active');
+      return;
     }
+
+    // A question counts as new when its id OR its serve timestamp changes:
+    // the host can re-serve the same question, and that must reset local state.
+    const anchorKey = `${currentQ.id}:${roundState.question_started_at}`;
+    if (anchorKeyRef.current === anchorKey) return;
+    anchorKeyRef.current = anchorKey;
+
+    // R6 - anchor the countdown on the local clock, now, so a slow realtime
+    // push does not eat into this participant's answer window.
+    const anchoredAt = Date.now();
+    anchorMsRef.current = anchoredAt;
+    setQuestionAnchor(anchoredAt);
+
+    answeredQuestionsRef.current.delete(currentQ.id);
+    setSelectedOption(null);
+    setLastResult(null);
+    setHasAnswered(false);
+    setGamePhase('active');
+
+    // A response may already exist - page reload, or a re-serve that did not
+    // clear responses. Reflect it rather than letting them answer twice.
+    checkExistingResponse(currentQ.id).then((existing) => {
+      if (!existing) return;
+      answeredQuestionsRef.current.add(currentQ.id);
+      setSelectedOption(existing.selected_option);
+      setLastResult({
+        is_correct: existing.is_correct,
+        points_awarded: existing.points_awarded,
+        response_time_ms: existing.response_time_ms,
+      });
+      setHasAnswered(true);
+    });
   }, [roundState, questionsLoaded, questions, checkExistingResponse]);
 
   const handleAnswer = useCallback(async (optionIndex) => {
     if (hasAnswered || !roundState || gamePhase !== 'active') return;
 
-    const currentQ = questions[roundState.current_question_index];
+    const currentQ = questions.find(
+      (q) => q.order_index === roundState.current_question_index
+    );
     if (!currentQ) return;
 
     setSelectedOption(optionIndex);
     setHasAnswered(true);
+
+    // R6 - response time measured on this client, from the moment the question
+    // rendered here. The server clamps it to the question duration.
+    const durationMs = roundState.question_duration_ms ?? DEFAULT_DURATION_MS;
+    const elapsedMs = anchorMsRef.current ? Date.now() - anchorMsRef.current : 0;
+    const responseTimeMs = Math.min(Math.max(Math.round(elapsedMs), 0), durationMs);
 
     try {
       const { data, error: rpcError } = await supabase.rpc('submit_response', {
         p_participant_id: participant.participant_id,
         p_question_id: currentQ.id,
         p_selected_option: optionIndex,
+        p_response_time_ms: responseTimeMs,
       });
 
       if (rpcError) {
@@ -206,28 +241,45 @@ export default function Round2Engine({ participant }) {
       setHasAnswered(true);
     }
 
+    // Manual mode: the host is choosing what goes live, so clients must not
+    // advance past the question they are driving. (R5)
+    if (roundState.manual_mode) {
+      setGamePhase('held');
+      return;
+    }
+
     setGamePhase('transition');
 
-    setTimeout(async () => {
+    // Held in a ref so navigating away mid-transition does not fire the RPC
+    // from a dead component. (ISSUES 3.9)
+    advanceTimeoutRef.current = setTimeout(async () => {
       try {
         await supabase.rpc('advance_question', { p_round: 2 });
+        // The realtime subscription will pick up the state change
       } catch (err) {
         console.error('Advance question error:', err);
       }
     }, TRANSITION_DELAY_MS);
   }, [roundState, hasAnswered]);
 
+  // Cancel a pending advance if we unmount first. (ISSUES 3.9)
+  useEffect(() => () => clearTimeout(advanceTimeoutRef.current), []);
+
   const handleBack = useCallback(() => {
     navigate('/');
   }, [navigate]);
 
-  const currentQuestion = roundState && questions.length > 0
-    ? questions[roundState.current_question_index] || null
+  const currentQuestion = roundState
+    ? questions.find((q) => q.order_index === roundState.current_question_index) || null
     : null;
 
-  const currentQuestionNumber = roundState
-    ? roundState.current_question_index + 1
+  // Position within the round, not the raw order_index - the host can serve
+  // out of order and "Question 3 of 5" should still read sensibly.
+  const currentQuestionNumber = currentQuestion
+    ? questions.findIndex((q) => q.id === currentQuestion.id) + 1
     : 0;
+
+  const questionDurationMs = roundState?.question_duration_ms ?? DEFAULT_DURATION_MS;
 
   // Render logic
 
@@ -325,10 +377,10 @@ export default function Round2Engine({ participant }) {
         <div className="r2-layout">
           <div className="r2-timer-col">
             <TimerRing
-              questionStartedAt={roundState?.question_started_at}
-              durationMs={10000}
+              startedAtMs={questionAnchor}
+              durationMs={questionDurationMs}
               onTimeUp={handleTimeUp}
-              isPaused={gamePhase === 'transition'}
+              isPaused={gamePhase === 'transition' || gamePhase === 'held'}
             />
           </div>
 
@@ -339,7 +391,7 @@ export default function Round2Engine({ participant }) {
                 questionNumber={currentQuestionNumber}
                 totalQuestions={questions.length}
                 onAnswer={handleAnswer}
-                disabled={hasAnswered || gamePhase === 'transition'}
+                disabled={hasAnswered || gamePhase !== 'active'}
                 lastResult={lastResult}
                 selectedOption={selectedOption}
               />
@@ -354,6 +406,14 @@ export default function Round2Engine({ participant }) {
         {gamePhase === 'transition' && (
           <div className="r2-transition">
             <p>Next question incoming…</p>
+            <span className="r2-spinner" />
+          </div>
+        )}
+
+        {/* Manual mode: the host decides when the next question goes live (R5) */}
+        {gamePhase === 'held' && (
+          <div className="r2-transition r2-transition--held">
+            <p>Time&rsquo;s up — waiting for the host&rsquo;s next question…</p>
             <span className="r2-spinner" />
           </div>
         )}
@@ -497,6 +557,11 @@ function Round2Styles() {
         cursor: pointer;
         bottom: auto;
         right: auto;
+      }
+
+      .r2-transition--held {
+        border-color: var(--warning-amber);
+        color: var(--warning-amber);
       }
 
       .r2-transition {

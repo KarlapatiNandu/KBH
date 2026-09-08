@@ -7,6 +7,10 @@ export default function LiveDashboard() {
   const [participants, setParticipants] = useState({});
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(true);
+  // R4 — the host reads this ranking to decide the hot seat, so the
+  // nomination action belongs right here on the row.
+  const [hotSeatId, setHotSeatId] = useState(null);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     fetchInitialData();
@@ -32,9 +36,10 @@ export default function LiveDashboard() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'round_state' },
         (payload) => {
-          if (payload.new.round === 1) {
-            setRound1(payload.new);
-          }
+          const updated = payload.new;
+          if (!updated || !updated.round) return; // DELETE carries no new row
+          if (updated.round === 1) setRound1(updated);
+          if (updated.round === 2) setHotSeatId(updated.active_participant_id);
         }
       )
       .subscribe();
@@ -45,12 +50,41 @@ export default function LiveDashboard() {
     };
   }, []);
 
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const nominate = async (participant) => {
+    if (!window.confirm(`Nominate ${participant.roll_no} for the Round 2 hot seat?`)) return;
+
+    const { data, error } = await supabase.rpc('nominate_hotseat', {
+      p_participant_id: participant.id,
+    });
+
+    if (error || !data?.success) {
+      showToast(error?.message || data?.error || 'Failed to nominate', 'error');
+      return;
+    }
+
+    setHotSeatId(participant.id);
+    showToast(`${participant.roll_no} nominated for the hot seat`);
+  };
+
   const fetchInitialData = async () => {
     setLoading(true);
     
     // Fetch state
     const { data: rsData } = await supabase.from('round_state').select('*').eq('round', 1).single();
     if (rsData) setRound1(rsData);
+
+    // Current hot seat nomination lives on the round 2 state row
+    const { data: r2Data } = await supabase
+      .from('round_state')
+      .select('active_participant_id')
+      .eq('round', 2)
+      .single();
+    if (r2Data) setHotSeatId(r2Data.active_participant_id);
 
     // Fetch questions
     const { data: qData } = await supabase.from('questions').select('*').eq('round', 1).order('order_index');
@@ -159,6 +193,7 @@ export default function LiveDashboard() {
                   ))}
                   <th style={{ textAlign: 'right' }}>Total Time</th>
                   <th style={{ textAlign: 'right' }}>Score</th>
+                  <th style={{ textAlign: 'right' }}>Hot Seat</th>
                 </tr>
               </thead>
               <tbody>
@@ -200,6 +235,19 @@ export default function LiveDashboard() {
                       <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '16px', color: 'var(--ocean-aqua)' }}>
                         {row.total_points}
                       </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {hotSeatId === p.id ? (
+                          <span className="badge badge--active">Nominated</span>
+                        ) : (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => nominate(p)}
+                            title="Send this participant to the Round 2 hot seat"
+                          >
+                            Nominate
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -208,6 +256,8 @@ export default function LiveDashboard() {
           </div>
         )}
       </div>
+
+      {toast && <div className={`toast toast--${toast.type}`}>{toast.message}</div>}
 
       <style>{`
         .ld-loading {

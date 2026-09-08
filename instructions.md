@@ -162,7 +162,9 @@ Router integration:
 - `App.jsx` updated — added `/round/1` route with participant guard, `ParticipantHomeWithNav` wrapper for navigation
 
 ### 🔲 Module 2: Admin Panel — existing components
-- `AdminLogin.jsx`, `AdminLayout.jsx`, `QuestionManager.jsx`, `ParticipantImport.jsx`, `RoundControl.jsx`, `LiveDashboard.jsx`
+- `AdminLayout.jsx`, `QuestionManager.jsx`, `ParticipantImport.jsx`, `RoundControl.jsx`, `QuestionConsole.jsx`, `LiveDashboard.jsx`
+- Admin login now lives in the unified `src/modules/auth/LoginPage.jsx` (v2)
+- Still open: Live Dashboard is Round-1-only and omits participants who have not answered
 
 ### ✅ Module 5: Round 2 Engine — COMPLETE
 Files created in `src/modules/round2/`:
@@ -176,6 +178,42 @@ Router integration:
 - `App.jsx` updated — added `/round/2` route
 
 ### 🔲 Module 6: Shared UI Polish — TODO
+
+---
+
+## v2 Refinement Pass
+
+Design notes and trade-offs: [`docs/REFINEMENT-PLAN.md`](docs/REFINEMENT-PLAN.md)
+
+### ✅ Unified login — COMPLETE
+`src/modules/auth/LoginPage.jsx` — one page at `/` with Participant and Admin
+tabs. `/admin/login` renders the same page with the Admin tab preselected.
+`ParticipantLogin.jsx` and `AdminLogin.jsx` are removed; participant session
+storage moved to `src/modules/participant/storage.js`.
+
+### ✅ Automatic network check — COMPLETE
+`src/modules/participant/NetworkCheck.jsx` — runs after participant login:
+3 latency probes via the new `network_ping()` RPC, plus a Realtime subscribe
+test. The verdict is written through `record_network_check`; failures render the
+participant's name in red in the admin Participants list. Passing navigates
+straight to Round 1.
+
+### ✅ Manual hot-seat nomination — COMPLETE
+`nominate_hotseat` RPC, with Nominate actions on both the Participants table and
+the Live Dashboard leaderboard. Round Control reads the nomination from
+`round_state.active_participant_id`.
+
+### ✅ Host-served questions — COMPLETE
+`src/modules/admin/QuestionConsole.jsx` + `serve_question` / `set_manual_mode` /
+`reset_round` RPCs. The host can push any question live in any order;
+`round_state.manual_mode` stops participant clients auto-advancing while they do.
+
+### ✅ Client-side question timer — COMPLETE
+Both `TimerRing`s now count down from a local anchor taken when the question
+renders on that client, and the engines send `p_response_time_ms` to
+`submit_response`, which clamps it to `round_state.question_duration_ms`. This
+is a deliberate move away from the v1 "server-timestamped scoring" line in
+Module 4 — see the plan doc for the trade-off.
 
 ---
 

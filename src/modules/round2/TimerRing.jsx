@@ -4,13 +4,16 @@ import { useState, useEffect, useRef } from 'react';
  * Module 5 — TimerRing (Round 2)
  *
  * Renders an SVG ring countdown timer.
+ *
+ * R6 — client-side countdown: counts down from `startedAtMs`, the local
+ * timestamp taken when this client rendered the question. See round1/TimerRing.
  */
 
 const RING_RADIUS = 78;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export default function TimerRing({
-  questionStartedAt,
+  startedAtMs,
   durationMs = 10000,
   onTimeUp,
   isPaused = false,
@@ -27,7 +30,7 @@ export default function TimerRing({
   useEffect(() => {
     hasCalledTimeUp.current = false;
     setRemainingMs(durationMs);
-  }, [questionStartedAt, durationMs]);
+  }, [startedAtMs, durationMs]);
 
   useEffect(() => {
     if (isPaused) {
@@ -35,7 +38,9 @@ export default function TimerRing({
       return;
     }
 
-    const startedAt = questionStartedAt ? new Date(questionStartedAt).getTime() : Date.now();
+    // R6 - the anchor is a local timestamp handed down by the engine (the
+    // moment this client rendered the question), never the server stamp.
+    const startedAt = startedAtMs || Date.now();
 
     const tick = () => {
       const elapsed = Date.now() - startedAt;
@@ -58,7 +63,7 @@ export default function TimerRing({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [questionStartedAt, durationMs, isPaused]);
+  }, [startedAtMs, durationMs, isPaused]);
 
   const fraction = Math.max(0, remainingMs / durationMs);
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction);

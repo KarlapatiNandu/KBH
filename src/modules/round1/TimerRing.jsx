@@ -1,24 +1,28 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 /**
  * Module 4 — TimerRing
  *
  * Renders an SVG ring countdown timer.
- * Calculates remaining time from server's `questionStartedAt` timestamp,
- * NOT from a local timer — this is a UX display only, scoring is server-side.
+ *
+ * R6 — the countdown is fully client-side. It counts down from `startedAtMs`,
+ * a local timestamp taken when this client rendered the question, so every
+ * participant gets the full duration regardless of how long the realtime push
+ * took to arrive. The engine measures the submitted response time from the
+ * same anchor; the server clamps it to the question duration.
  *
  * Props:
- *   questionStartedAt  — ISO timestamp from round_state.question_started_at
- *   durationMs         — total question duration (default 10000)
- *   onTimeUp()         — called once when countdown reaches zero
- *   isPaused           — if true, freezes the ring (used during transitions)
+ *   startedAtMs  — local Date.now() anchor for the current question
+ *   durationMs   — total question duration (from round_state.question_duration_ms)
+ *   onTimeUp()   — called once when the countdown reaches zero
+ *   isPaused     — if true, freezes the ring (transitions / manual-mode hold)
  */
 
 const RING_RADIUS = 78;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export default function TimerRing({
-  questionStartedAt,
+  startedAtMs,
   durationMs = 10000,
   onTimeUp,
   isPaused = false,
@@ -33,11 +37,11 @@ export default function TimerRing({
     onTimeUpRef.current = onTimeUp;
   }, [onTimeUp]);
 
-  // Reset when question changes
+  // Reset when the question changes
   useEffect(() => {
     hasCalledTimeUp.current = false;
     setRemainingMs(durationMs);
-  }, [questionStartedAt, durationMs]);
+  }, [startedAtMs, durationMs]);
 
   // Animation loop
   useEffect(() => {
@@ -46,7 +50,9 @@ export default function TimerRing({
       return;
     }
 
-    const startedAt = questionStartedAt ? new Date(questionStartedAt).getTime() : Date.now();
+    // R6 - the anchor is a local timestamp handed down by the engine (the
+    // moment this client rendered the question), never the server stamp.
+    const startedAt = startedAtMs || Date.now();
 
     const tick = () => {
       const elapsed = Date.now() - startedAt;
@@ -69,7 +75,7 @@ export default function TimerRing({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [questionStartedAt, durationMs, isPaused]);
+  }, [startedAtMs, durationMs, isPaused]);
 
   // Visual calculations
   const fraction = Math.max(0, remainingMs / durationMs);

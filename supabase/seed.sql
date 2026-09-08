@@ -39,7 +39,16 @@ ON CONFLICT (roll_no) DO NOTHING;
 
 
 -- ─── Round 1 Questions (5) ──────────────────────────────────
-INSERT INTO questions (round, text, options, correct_option, base_points, order_index) VALUES
+-- Guarded on "this round already has questions" rather than ON CONFLICT:
+-- (round, order_index) has no unique index, and it can't have one while
+-- QuestionManager reorders by swapping the two rows' order_index in
+-- separate statements. Without the guard a second run of this file
+-- duplicates every question, and because both the client and
+-- submit_response address the live question by order_index, the two
+-- copies can resolve differently and every answer is rejected with
+-- "Question is not current".
+INSERT INTO questions (round, text, options, correct_option, base_points, order_index)
+SELECT * FROM (VALUES
   (1, 'Which planet is known as the Red Planet?',
      '["Venus", "Mars", "Jupiter", "Saturn"]'::jsonb, 1, 100, 0),
   (1, 'What is the chemical symbol for Gold?',
@@ -49,11 +58,14 @@ INSERT INTO questions (round, text, options, correct_option, base_points, order_
   (1, 'What is the largest ocean on Earth?',
      '["Atlantic Ocean", "Indian Ocean", "Arctic Ocean", "Pacific Ocean"]'::jsonb, 3, 100, 3),
   (1, 'In which year did India gain independence?',
-     '["1942", "1945", "1947", "1950"]'::jsonb, 2, 100, 4);
+     '["1942", "1945", "1947", "1950"]'::jsonb, 2, 100, 4)
+) AS v(round, text, options, correct_option, base_points, order_index)
+WHERE NOT EXISTS (SELECT 1 FROM questions q WHERE q.round = 1);
 
 
 -- ─── Round 2 Questions (5) ──────────────────────────────────
-INSERT INTO questions (round, text, options, correct_option, base_points, order_index) VALUES
+INSERT INTO questions (round, text, options, correct_option, base_points, order_index)
+SELECT * FROM (VALUES
   (2, 'What is the currency of Japan?',
      '["Won", "Yuan", "Yen", "Ringgit"]'::jsonb, 2, 100, 0),
   (2, 'Which element has atomic number 1?',
@@ -63,7 +75,9 @@ INSERT INTO questions (round, text, options, correct_option, base_points, order_
   (2, 'What is the tallest mountain in the world?',
      '["K2", "Kangchenjunga", "Mount Everest", "Lhotse"]'::jsonb, 2, 100, 3),
   (2, 'Which country hosted the 2016 Summer Olympics?',
-     '["China", "UK", "Brazil", "Japan"]'::jsonb, 2, 100, 4);
+     '["China", "UK", "Brazil", "Japan"]'::jsonb, 2, 100, 4)
+) AS v(round, text, options, correct_option, base_points, order_index)
+WHERE NOT EXISTS (SELECT 1 FROM questions q WHERE q.round = 2);
 
 
 -- ─── Round State (both rounds inactive) ─────────────────────

@@ -1,6 +1,43 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
+/**
+ * Declared at module scope on purpose: defining it inside QuestionManager
+ * makes React see a new component type on every render, remounting the
+ * subtree so option inputs lose focus after each keystroke. (ISSUES 3.8)
+ */
+function OptionEditor({ options, correctOption, onChange, onCorrectChange }) {
+  return (
+    <div className="option-editor">
+      {options.map((opt, i) => (
+        <div key={i} className="option-row">
+          <span className="option-label">{String.fromCharCode(65 + i)}</span>
+          <input
+            type="text"
+            className="form-input option-input"
+            value={opt}
+            onChange={(e) => {
+              const updated = [...options];
+              updated[i] = e.target.value;
+              onChange(updated);
+            }}
+            placeholder={`Option ${String.fromCharCode(65 + i)}`}
+          />
+          <button
+            type="button"
+            className={`btn-correct ${correctOption === i ? 'btn-correct--active' : ''}`}
+            onClick={() => onCorrectChange(i)}
+            title="Mark as correct"
+          >
+            ✓
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 export default function QuestionManager() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -81,16 +118,29 @@ export default function QuestionManager() {
     }
   };
 
-  const deleteQuestion = async (id) => {
+  const deleteQuestion = async (question) => {
     if (!window.confirm('Delete this question? This cannot be undone.')) return;
 
-    const { error } = await supabase.from('questions').delete().eq('id', id);
+    const { error } = await supabase.from('questions').delete().eq('id', question.id);
     if (error) {
       showToast('Failed to delete question', 'error');
-    } else {
-      showToast('Question deleted');
-      fetchQuestions();
+      return;
     }
+
+    // Close the gap this leaves in order_index. The server addresses the live
+    // question by order_index, so a hole would desynchronise the round and
+    // break the host console's Next/Previous. (ISSUES 1.4)
+    const { error: renumberError } = await supabase.rpc('renumber_questions', {
+      p_round: question.round,
+    });
+
+    showToast(
+      renumberError
+        ? 'Question deleted, but renumbering failed — check question order'
+        : 'Question deleted',
+      renumberError ? 'error' : 'success'
+    );
+    fetchQuestions();
   };
 
   const addQuestion = async () => {
@@ -138,34 +188,6 @@ export default function QuestionManager() {
     fetchQuestions();
   };
 
-  const OptionEditor = ({ options, correctOption, onChange, onCorrectChange }) => (
-    <div className="option-editor">
-      {options.map((opt, i) => (
-        <div key={i} className="option-row">
-          <span className="option-label">{String.fromCharCode(65 + i)}</span>
-          <input
-            type="text"
-            className="form-input option-input"
-            value={opt}
-            onChange={(e) => {
-              const updated = [...options];
-              updated[i] = e.target.value;
-              onChange(updated);
-            }}
-            placeholder={`Option ${String.fromCharCode(65 + i)}`}
-          />
-          <button
-            type="button"
-            className={`btn-correct ${correctOption === i ? 'btn-correct--active' : ''}`}
-            onClick={() => onCorrectChange(i)}
-            title="Mark as correct"
-          >
-            ✓
-          </button>
-        </div>
-      ))}
-    </div>
-  );
 
   return (
     <div className="qm">
@@ -278,7 +300,7 @@ export default function QuestionManager() {
                   ) : (
                     <>
                       <button className="btn-icon" onClick={() => startEdit(q)} title="Edit">✏️</button>
-                      <button className="btn-icon" onClick={() => deleteQuestion(q.id)} title="Delete" style={{ color: 'var(--danger-red)' }}>🗑️</button>
+                      <button className="btn-icon" onClick={() => deleteQuestion(q)} title="Delete" style={{ color: 'var(--danger-red)' }}>🗑️</button>
                     </>
                   )}
                 </div>
