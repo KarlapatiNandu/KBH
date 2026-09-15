@@ -142,7 +142,13 @@ export default function App() {
         <Route
           path="/"
           element={
-            !participant ? (
+            admin ? (
+              // The unified LoginPage renders here too (its Admin tab), so a
+              // login completed from "/" needs the same redirect "/admin/login"
+              // already had — otherwise admin state updates with nothing on
+              // screen reacting to it.
+              <Navigate to="/admin" replace />
+            ) : !participant ? (
               <LoginPage
                 initialTab="participant"
                 onParticipantLogin={handleParticipantLogin}
