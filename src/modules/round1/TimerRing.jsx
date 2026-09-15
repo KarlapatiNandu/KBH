@@ -84,7 +84,7 @@ export default function TimerRing({
 
   // Color transitions: green → amber → red
   const getTimerColor = () => {
-    if (fraction > 0.5) return 'var(--ocean-aqua)';
+    if (fraction > 0.5) return 'var(--spotlight-gold)';
     if (fraction > 0.25) return 'var(--warning-amber)';
     return 'var(--danger-red)';
   };
@@ -102,7 +102,7 @@ export default function TimerRing({
             cy="90"
             r={RING_RADIUS}
             fill="none"
-            stroke="rgba(36,184,175,0.12)"
+            stroke="rgba(242,183,5,0.12)"
             strokeWidth="8"
           />
           {/* Active ring */}

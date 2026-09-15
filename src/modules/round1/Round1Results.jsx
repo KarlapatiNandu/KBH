@@ -113,6 +113,7 @@ export default function Round1Results({ participant, questions, onBack }) {
           {myRank ? `#${myRank}` : '—'}
         </div>
         <h2 className="r1r-hero-title">Round 1 Complete!</h2>
+        <p className="r1r-hero-tagline">{getRankQuip(myRank)}</p>
         <div className="r1r-hero-stats">
           <div className="r1r-stat">
             <span className="r1r-stat-value">{myTotal}</span>
@@ -223,7 +224,7 @@ export default function Round1Results({ participant, questions, onBack }) {
         .r1r-loading {
           text-align: center;
           padding: var(--space-2xl);
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -234,7 +235,7 @@ export default function Round1Results({ participant, questions, onBack }) {
           width: 32px;
           height: 32px;
           border: 3px solid transparent;
-          border-top-color: var(--ocean-aqua);
+          border-top-color: var(--spotlight-gold);
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
         }
@@ -248,8 +249,8 @@ export default function Round1Results({ participant, questions, onBack }) {
           text-align: center;
           padding: var(--space-2xl) var(--space-lg);
           margin-bottom: var(--space-xl);
-          background: linear-gradient(135deg, rgba(16,43,86,0.92) 0%, rgba(32,76,188,0.88) 100%);
-          border: 1px solid rgba(36,184,175,0.2);
+          background: linear-gradient(135deg, rgba(11,20,64,0.92) 0%, rgba(52,24,104,0.88) 100%);
+          border: 1px solid rgba(242,183,5,0.2);
           border-radius: var(--radius-xl);
           animation: heroFadeIn 0.5s ease;
         }
@@ -263,7 +264,7 @@ export default function Round1Results({ participant, questions, onBack }) {
           width: 72px;
           height: 72px;
           border-radius: 50%;
-          background: linear-gradient(135deg, var(--ocean-aqua), var(--faded-jade));
+          background: linear-gradient(135deg, var(--spotlight-gold), var(--amber-glow));
           color: var(--deep-midnight);
           font-family: 'Poppins', sans-serif;
           font-weight: 700;
@@ -276,6 +277,14 @@ export default function Round1Results({ participant, questions, onBack }) {
 
         .r1r-hero-title {
           font-size: 26px;
+          margin-bottom: var(--space-xs);
+        }
+
+        .r1r-hero-tagline {
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          font-style: italic;
+          color: var(--pale-gold);
           margin-bottom: var(--space-lg);
         }
 
@@ -296,13 +305,13 @@ export default function Round1Results({ participant, questions, onBack }) {
           font-family: 'Poppins', sans-serif;
           font-weight: 700;
           font-size: 28px;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
         }
 
         .r1r-stat-label {
           font-family: 'Inter', sans-serif;
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           text-transform: uppercase;
           letter-spacing: 0.5px;
           margin-top: 2px;
@@ -311,7 +320,7 @@ export default function Round1Results({ participant, questions, onBack }) {
         .r1r-stat-divider {
           width: 1px;
           height: 40px;
-          background: rgba(36,184,175,0.2);
+          background: rgba(242,183,5,0.2);
         }
 
         /* Sections */
@@ -323,7 +332,7 @@ export default function Round1Results({ participant, questions, onBack }) {
           font-size: 18px;
           margin-bottom: var(--space-md);
           padding-bottom: var(--space-sm);
-          border-bottom: 1px solid rgba(36,184,175,0.15);
+          border-bottom: 1px solid rgba(242,183,5,0.15);
         }
 
         /* Question breakdown */
@@ -334,8 +343,8 @@ export default function Round1Results({ participant, questions, onBack }) {
         }
 
         .r1r-q-row {
-          background: rgba(16,43,86,0.5);
-          border: 1px solid rgba(36,184,175,0.1);
+          background: rgba(11,20,64,0.5);
+          border: 1px solid rgba(242,183,5,0.1);
           border-radius: var(--radius-md);
           padding: 14px 16px;
         }
@@ -364,13 +373,13 @@ export default function Round1Results({ participant, questions, onBack }) {
         .r1r-q-detail {
           margin-top: var(--space-sm);
           padding-top: var(--space-sm);
-          border-top: 1px solid rgba(36,184,175,0.08);
+          border-top: 1px solid rgba(242,183,5,0.08);
           display: flex;
           gap: var(--space-lg);
           flex-wrap: wrap;
           font-family: 'Inter', sans-serif;
           font-size: 13px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         /* Leaderboard */
@@ -379,12 +388,12 @@ export default function Round1Results({ participant, questions, onBack }) {
         }
 
         .r1r-lb-me {
-          background: rgba(36,184,175,0.1) !important;
+          background: rgba(242,183,5,0.1) !important;
         }
 
         .r1r-lb-me td {
           font-weight: 600;
-          color: var(--ocean-aqua) !important;
+          color: var(--spotlight-gold) !important;
         }
 
         .r1r-rank {
@@ -422,11 +431,11 @@ export default function Round1Results({ participant, questions, onBack }) {
         .r1r-lb-score {
           font-family: 'Poppins', sans-serif;
           font-weight: 700;
-          color: var(--ocean-aqua) !important;
+          color: var(--spotlight-gold) !important;
         }
 
         .r1r-lb-time {
-          color: var(--serene-seafoam) !important;
+          color: var(--pale-gold) !important;
         }
 
         /* Footer */
@@ -455,4 +464,16 @@ export default function Round1Results({ participant, questions, onBack }) {
       `}</style>
     </div>
   );
+}
+
+
+/* ===== Helpers ===== */
+
+function getRankQuip(rank) {
+  if (!rank) return "You're on the board somewhere. Probably.";
+  if (rank === 1) return "Top of the leaderboard. Try to act surprised.";
+  if (rank === 2) return 'So close to glory you can smell the ₹.';
+  if (rank === 3) return 'Bronze medal energy. Respectable.';
+  if (rank <= 10) return "Top 10 — not bad, ask for a raise.";
+  return "Room to grow. Lots of it. Round 2 awaits.";
 }

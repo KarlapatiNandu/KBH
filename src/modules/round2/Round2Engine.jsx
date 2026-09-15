@@ -457,7 +457,7 @@ function Round2Styles() {
       .r2-status-text {
         font-family: 'Inter', sans-serif;
         font-size: 16px;
-        color: var(--serene-seafoam);
+        color: var(--pale-gold);
       }
 
       .r2-waiting-icon {

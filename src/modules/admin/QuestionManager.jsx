@@ -276,7 +276,7 @@ export default function QuestionManager() {
       {loading ? (
         <div className="qm-loading">Loading questions…</div>
       ) : filtered.length === 0 ? (
-        <div className="qm-empty">No questions found. Add one to get started.</div>
+        <div className="qm-empty">No questions found. A quiz needs questions — funny how that works.</div>
       ) : (
         <div className="qm-list">
           {filtered.map((q) => (
@@ -420,7 +420,7 @@ export default function QuestionManager() {
           width: 24px;
           height: 24px;
           border-radius: 50%;
-          background: var(--ocean-aqua);
+          background: var(--spotlight-gold);
           color: var(--deep-midnight);
           font-weight: 600;
           font-size: 12px;
@@ -438,7 +438,7 @@ export default function QuestionManager() {
           width: 32px;
           height: 32px;
           border-radius: 50%;
-          border: 1.5px solid var(--twilight-teal);
+          border: 1.5px solid var(--antique-gold);
           background: transparent;
           color: rgba(240, 244, 248, 0.35);
           font-size: 14px;
@@ -463,7 +463,7 @@ export default function QuestionManager() {
         .qm-loading, .qm-empty {
           text-align: center;
           padding: var(--space-2xl);
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           font-size: 15px;
         }
 
@@ -496,12 +496,12 @@ export default function QuestionManager() {
           font-family: 'Poppins', sans-serif;
           font-weight: 600;
           font-size: 14px;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
         }
 
         .qm-points {
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .qm-item-actions {
@@ -531,7 +531,7 @@ export default function QuestionManager() {
           padding: 8px 14px;
           border-radius: var(--radius-sm);
           font-size: 14px;
-          background: rgba(36,184,175,0.05);
+          background: rgba(242,183,5,0.05);
         }
 
         .qm-option--correct {
@@ -543,7 +543,7 @@ export default function QuestionManager() {
           width: 20px;
           height: 20px;
           border-radius: 50%;
-          background: var(--ocean-aqua);
+          background: var(--spotlight-gold);
           color: var(--deep-midnight);
           font-weight: 600;
           font-size: 11px;

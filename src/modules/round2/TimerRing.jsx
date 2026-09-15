@@ -118,7 +118,7 @@ export default function TimerRing({
 
       <style>{`
         .r2-timer-card {
-          background: rgba(16,43,86,0.6);
+          background: rgba(11,20,64,0.6);
           border: 1px solid rgba(245,166,35,0.2);
           border-radius: var(--radius-lg);
           padding: var(--space-xl);
@@ -149,7 +149,7 @@ export default function TimerRing({
         .r2-timer-caption {
           font-family: 'Inter', sans-serif;
           font-size: 14px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }

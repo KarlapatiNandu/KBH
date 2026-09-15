@@ -55,6 +55,7 @@ export default function Round2Results({ participant, questions, onBack }) {
       <div className="r2r-hero">
         <div className="r2r-hero-badge">🔥</div>
         <h2 className="r2r-hero-title">Hot Seat Complete!</h2>
+        <p className="r2r-hero-tagline">{getHotSeatQuip(myTotal, myResponses, questions.length)}</p>
         <div className="r2r-hero-stats">
           <div className="r2r-stat">
             <span className="r2r-stat-value">{myTotal}</span>
@@ -172,8 +173,16 @@ export default function Round2Results({ participant, questions, onBack }) {
 
         .r2r-hero-title {
           font-size: 26px;
-          margin-bottom: var(--space-lg);
+          margin-bottom: var(--space-xs);
           color: var(--warning-amber);
+        }
+
+        .r2r-hero-tagline {
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          font-style: italic;
+          color: var(--pale-gold);
+          margin-bottom: var(--space-lg);
         }
 
         .r2r-hero-stats {
@@ -199,7 +208,7 @@ export default function Round2Results({ participant, questions, onBack }) {
         .r2r-stat-label {
           font-family: 'Inter', sans-serif;
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           text-transform: uppercase;
           letter-spacing: 0.5px;
           margin-top: 2px;
@@ -232,7 +241,7 @@ export default function Round2Results({ participant, questions, onBack }) {
         }
 
         .r2r-q-row {
-          background: rgba(16,43,86,0.6);
+          background: rgba(11,20,64,0.6);
           border: 1px solid rgba(245,166,35,0.15);
           border-radius: var(--radius-md);
           padding: 14px 16px;
@@ -275,7 +284,7 @@ export default function Round2Results({ participant, questions, onBack }) {
           flex-wrap: wrap;
           font-family: 'Inter', sans-serif;
           font-size: 13px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         /* Footer */
@@ -304,4 +313,15 @@ export default function Round2Results({ participant, questions, onBack }) {
       `}</style>
     </div>
   );
+}
+
+
+/* ===== Helpers ===== */
+
+function getHotSeatQuip(total, responses, questionCount) {
+  const correct = responses.filter((r) => r.is_correct).length;
+  if (questionCount > 0 && correct === questionCount) return 'A clean sweep. The hot seat has been tamed.';
+  if (total === 0) return 'Rough round. The hot seat wins this one.';
+  if (correct >= questionCount / 2) return 'Solid nerve under the lights.';
+  return 'Survived the spotlight — that counts for something.';
 }

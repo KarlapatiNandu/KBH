@@ -178,7 +178,7 @@ export default function LiveDashboard() {
         </div>
 
         {leaderboard.length === 0 ? (
-          <div className="ld-empty">No responses yet.</div>
+          <div className="ld-empty">No responses yet. The silence is deafening.</div>
         ) : (
           <div className="ld-table-wrap">
             <table className="data-table">
@@ -229,10 +229,10 @@ export default function LiveDashboard() {
                           </td>
                         );
                       })}
-                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--serene-seafoam)' }}>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--pale-gold)' }}>
                         {formatTime(row.total_time_ms)}
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '16px', color: 'var(--ocean-aqua)' }}>
+                      <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '16px', color: 'var(--spotlight-gold)' }}>
                         {row.total_points}
                       </td>
                       <td style={{ textAlign: 'right' }}>
@@ -263,7 +263,7 @@ export default function LiveDashboard() {
         .ld-loading {
           text-align: center;
           padding: var(--space-2xl);
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .ld-header {
@@ -286,7 +286,7 @@ export default function LiveDashboard() {
         .ld-stat-label {
           font-size: 12px;
           text-transform: uppercase;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           letter-spacing: 0.5px;
         }
 
@@ -349,14 +349,14 @@ export default function LiveDashboard() {
         .ld-empty {
           text-align: center;
           padding: var(--space-xl);
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .ld-rank {
           font-family: 'Poppins', sans-serif;
           font-weight: 700;
           font-size: 16px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .ld-player-info {
@@ -372,7 +372,7 @@ export default function LiveDashboard() {
 
         .ld-name {
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .ld-ans {

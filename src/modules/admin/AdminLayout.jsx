@@ -4,6 +4,7 @@ import QuestionManager from './QuestionManager';
 import ParticipantImport from './ParticipantImport';
 import RoundControl from './RoundControl';
 import LiveDashboard from './LiveDashboard';
+import logo from '../../assets/logo.png';
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Live Dashboard', icon: '📊' },
@@ -35,15 +36,10 @@ export default function AdminLayout({ session, onLogout }) {
       {/* Sidebar */}
       <aside className="admin-sidebar">
         <div className="sidebar-brand">
-          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 120 120" aria-label="KBH crest">
-            <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(36,184,175,0.2)" strokeWidth="6" />
-            <circle cx="60" cy="60" r="28" fill="var(--twilight-teal)" />
-            <text x="60" y="60" textAnchor="middle" dominantBaseline="central"
-                  fontFamily="'Poppins', sans-serif" fontWeight="700" fontSize="28" fill="var(--fresh-mint)">₹</text>
-          </svg>
+          <img src={logo} alt="KBH crest" className="sidebar-crest" width="36" height="36" />
           <div>
             <div className="brand-title">KBH Admin</div>
-            <div className="brand-subtitle">Control Panel</div>
+            <div className="brand-subtitle">Mission Control</div>
           </div>
         </div>
 
@@ -92,8 +88,8 @@ export default function AdminLayout({ session, onLogout }) {
         /* ── Sidebar ── */
         .admin-sidebar {
           width: 260px;
-          background: rgba(16, 43, 86, 0.95);
-          border-right: 1px solid rgba(36,184,175,0.1);
+          background: rgba(11,20,64, 0.95);
+          border-right: 1px solid rgba(242,183,5,0.1);
           display: flex;
           flex-direction: column;
           padding: var(--space-lg) 0;
@@ -105,8 +101,14 @@ export default function AdminLayout({ session, onLogout }) {
           align-items: center;
           gap: 12px;
           padding: 0 var(--space-lg) var(--space-lg);
-          border-bottom: 1px solid rgba(36,184,175,0.1);
+          border-bottom: 1px solid rgba(242,183,5,0.1);
           margin-bottom: var(--space-md);
+        }
+
+        .sidebar-crest {
+          border-radius: 50%;
+          flex-shrink: 0;
+          filter: drop-shadow(0 2px 6px rgba(242,183,5,0.3));
         }
 
         .brand-title {
@@ -119,7 +121,7 @@ export default function AdminLayout({ session, onLogout }) {
         .brand-subtitle {
           font-family: 'Inter', sans-serif;
           font-size: 11px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           text-transform: uppercase;
           letter-spacing: 1px;
         }
@@ -151,13 +153,13 @@ export default function AdminLayout({ session, onLogout }) {
         }
 
         .sidebar-link:hover {
-          background: rgba(36,184,175,0.08);
+          background: rgba(242,183,5,0.08);
           color: var(--cloud-white);
         }
 
         .sidebar-link--active {
-          background: rgba(36,184,175,0.12);
-          color: var(--ocean-aqua);
+          background: rgba(242,183,5,0.12);
+          color: var(--spotlight-gold);
         }
 
         .sidebar-icon {
@@ -168,7 +170,7 @@ export default function AdminLayout({ session, onLogout }) {
 
         .sidebar-footer {
           padding: var(--space-md) var(--space-lg) 0;
-          border-top: 1px solid rgba(36,184,175,0.1);
+          border-top: 1px solid rgba(242,183,5,0.1);
           display: flex;
           flex-direction: column;
           gap: var(--space-sm);
@@ -176,7 +178,7 @@ export default function AdminLayout({ session, onLogout }) {
 
         .user-email {
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -196,7 +198,7 @@ export default function AdminLayout({ session, onLogout }) {
 
         .admin-topbar {
           padding: var(--space-lg) var(--space-xl);
-          border-bottom: 1px solid rgba(36,184,175,0.08);
+          border-bottom: 1px solid rgba(242,183,5,0.08);
         }
 
         .admin-page-title {

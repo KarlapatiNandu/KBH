@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS participants (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   roll_no     TEXT UNIQUE NOT NULL,
   name        TEXT,
-  pin_hash    TEXT,                        -- null until claimed on first login
+  pin         TEXT,                        -- null until claimed on first login; stored raw
   created_at  TIMESTAMPTZ DEFAULT now(),
 
   -- Network check state (R2) — set by record_network_check after login
@@ -110,10 +110,10 @@ DROP POLICY IF EXISTS "Anon read responses" ON responses;
 CREATE POLICY "Anon read responses" ON responses
   FOR SELECT USING (true);
 
--- Hide pin_hash from anonymous clients (ISSUES 1.5).
+-- Hide pin from anonymous clients (ISSUES 1.5).
 -- RLS is row-level; column-level grants are the tool for this.
 --
--- `REVOKE SELECT (pin_hash)` alone does NOT work: while a role still holds
+-- `REVOKE SELECT (pin)` alone does NOT work: while a role still holds
 -- the table-level SELECT grant, Postgres cannot subtract a single column
 -- from it — it emits "no privileges could be revoked" and the column stays
 -- readable. The table grant has to go first, then the allowed columns come

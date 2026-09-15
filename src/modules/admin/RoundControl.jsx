@@ -354,7 +354,7 @@ export default function RoundControl() {
         .rc-loading {
           text-align: center;
           padding: var(--space-2xl);
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .rc-grid {
@@ -371,8 +371,8 @@ export default function RoundControl() {
         }
 
         .rc-card--active {
-          border-color: var(--ocean-aqua);
-          box-shadow: 0 0 0 2px rgba(36,184,175,0.2), var(--shadow-card);
+          border-color: var(--spotlight-gold);
+          box-shadow: 0 0 0 2px rgba(242,183,5,0.2), var(--shadow-card);
         }
 
         .rc-header {
@@ -380,7 +380,7 @@ export default function RoundControl() {
           justify-content: space-between;
           align-items: flex-start;
           margin-bottom: var(--space-md);
-          border-bottom: 1px solid rgba(36,184,175,0.1);
+          border-bottom: 1px solid rgba(242,183,5,0.1);
           padding-bottom: var(--space-sm);
         }
 
@@ -396,14 +396,14 @@ export default function RoundControl() {
         .rc-question-meta {
           font-family: 'Poppins', sans-serif;
           font-weight: 600;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
           font-size: 16px;
         }
 
         .rc-body { flex: 1; }
 
         .rc-desc {
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           font-size: 14px;
           margin-bottom: var(--space-lg);
           line-height: 1.5;
@@ -418,10 +418,10 @@ export default function RoundControl() {
         .rc-hs-select {
           width: 100%;
           margin-bottom: var(--space-lg);
-          background: rgba(16, 43, 86, 0.4);
+          background: rgba(11,20,64, 0.4);
           padding: var(--space-md);
           border-radius: var(--radius-md);
-          border: 1px solid rgba(36,184,175,0.1);
+          border: 1px solid rgba(242,183,5,0.1);
         }
 
         .rc-participant-search {
@@ -437,7 +437,7 @@ export default function RoundControl() {
           left: 0;
           right: 0;
           background: var(--deep-midnight);
-          border: 1px solid var(--twilight-teal);
+          border: 1px solid var(--antique-gold);
           border-radius: var(--radius-md);
           margin-top: 4px;
           max-height: 200px;
@@ -451,10 +451,10 @@ export default function RoundControl() {
           display: flex;
           gap: 12px;
           cursor: pointer;
-          border-bottom: 1px solid rgba(36,184,175,0.1);
+          border-bottom: 1px solid rgba(242,183,5,0.1);
         }
 
-        .rc-search-item:hover { background: rgba(36,184,175,0.08); }
+        .rc-search-item:hover { background: rgba(242,183,5,0.08); }
 
         .rc-item-roll {
           font-family: 'Poppins', sans-serif;
@@ -462,11 +462,11 @@ export default function RoundControl() {
           color: var(--cloud-white);
         }
 
-        .rc-item-name { color: var(--serene-seafoam); }
+        .rc-item-name { color: var(--pale-gold); }
 
         .rc-search-empty {
           padding: 10px 14px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           font-size: 13px;
           text-align: center;
         }
@@ -477,8 +477,8 @@ export default function RoundControl() {
           gap: 12px;
           margin-top: var(--space-xs);
           padding: 12px;
-          background: rgba(36,184,175,0.1);
-          border: 1px solid var(--twilight-teal);
+          background: rgba(242,183,5,0.1);
+          border: 1px solid var(--antique-gold);
           border-radius: var(--radius-md);
         }
 
@@ -486,7 +486,7 @@ export default function RoundControl() {
           font-family: 'Poppins', sans-serif;
           font-weight: 700;
           font-size: 18px;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
         }
 
         .rc-player-name {
@@ -499,7 +499,7 @@ export default function RoundControl() {
         .rc-actions {
           margin-top: var(--space-xl);
           padding-top: var(--space-md);
-          border-top: 1px solid rgba(36,184,175,0.1);
+          border-top: 1px solid rgba(242,183,5,0.1);
           display: flex;
           gap: var(--space-sm);
           justify-content: flex-end;

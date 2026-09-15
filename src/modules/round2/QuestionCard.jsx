@@ -123,7 +123,7 @@ export default function QuestionCard({
 
       <style>{`
         .r2-q-card {
-          background: rgba(16,43,86,0.6);
+          background: rgba(11,20,64,0.6);
           border: 1px solid rgba(245,166,35,0.2);
           border-radius: var(--radius-lg);
           padding: var(--space-xl);
@@ -190,8 +190,8 @@ export default function QuestionCard({
           gap: var(--space-md);
           width: 100%;
           padding: 16px 20px;
-          background: rgba(36,184,175,0.05);
-          border: 1px solid rgba(36,184,175,0.2);
+          background: rgba(242,183,5,0.05);
+          border: 1px solid rgba(242,183,5,0.2);
           border-radius: var(--radius-md);
           color: var(--cloud-white);
           font-family: 'Inter', sans-serif;
@@ -207,8 +207,8 @@ export default function QuestionCard({
           width: 28px;
           height: 28px;
           border-radius: 50%;
-          background: rgba(36,184,175,0.15);
-          color: var(--ocean-aqua);
+          background: rgba(242,183,5,0.15);
+          color: var(--spotlight-gold);
           font-weight: 600;
           font-size: 14px;
         }
@@ -336,7 +336,7 @@ export default function QuestionCard({
         .r2-qc-submitting {
           position: absolute;
           inset: 0;
-          background: rgba(16,43,86,0.85);
+          background: rgba(11,20,64,0.85);
           display: flex;
           align-items: center;
           justify-content: center;

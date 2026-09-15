@@ -196,7 +196,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
             ? (result.passed
                 ? 'Taking you to Round 1…'
                 : 'Your device may struggle during the live round.')
-            : `Hang tight, ${participant.name || participant.roll_no} — this takes a few seconds.`}
+            : `Hang tight, ${participant.name || participant.roll_no} — interrogating your WiFi.`}
         </p>
 
         <ul className="nc-steps">
@@ -266,7 +266,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
         .nc-sub {
           font-family: 'Inter', sans-serif;
           font-size: 14px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           margin-bottom: var(--space-lg);
         }
 
@@ -284,8 +284,8 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
           align-items: center;
           gap: 12px;
           padding: 12px 14px;
-          background: rgba(16, 43, 86, 0.5);
-          border: 1px solid rgba(36,184,175,0.12);
+          background: rgba(11,20,64, 0.5);
+          border: 1px solid rgba(242,183,5,0.12);
           border-radius: var(--radius-md);
         }
 
@@ -310,7 +310,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
 
         .nc-step-icon--running {
           border: 2px solid transparent;
-          border-top-color: var(--ocean-aqua);
+          border-top-color: var(--spotlight-gold);
           animation: ncSpin 0.7s linear infinite;
         }
 
@@ -342,7 +342,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
         .nc-step-detail {
           font-family: 'Inter', sans-serif;
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .nc-actions {

@@ -165,14 +165,14 @@ export default function QuestionConsole({ round, roundState, questions, onResult
         .qc {
           width: 100%;
           margin-bottom: var(--space-lg);
-          background: rgba(16, 43, 86, 0.4);
-          border: 1px solid rgba(36,184,175,0.1);
+          background: rgba(11,20,64, 0.4);
+          border: 1px solid rgba(242,183,5,0.1);
           border-radius: var(--radius-md);
           padding: var(--space-md);
         }
 
         .qc--empty {
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           font-size: 13px;
           text-align: center;
           padding: var(--space-lg) var(--space-md);
@@ -204,9 +204,9 @@ export default function QuestionConsole({ round, roundState, questions, onResult
           gap: 8px;
           padding: 6px 14px;
           border-radius: var(--radius-pill);
-          border: 1px solid rgba(36,184,175,0.25);
+          border: 1px solid rgba(242,183,5,0.25);
           background: transparent;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           font-family: 'Inter', sans-serif;
           font-size: 13px;
           font-weight: 600;
@@ -214,7 +214,7 @@ export default function QuestionConsole({ round, roundState, questions, onResult
           transition: all 0.15s ease;
         }
 
-        .qc-mode:hover { border-color: var(--ocean-aqua); color: var(--cloud-white); }
+        .qc-mode:hover { border-color: var(--spotlight-gold); color: var(--cloud-white); }
 
         .qc-mode--on {
           border-color: var(--warning-amber);
@@ -234,7 +234,7 @@ export default function QuestionConsole({ round, roundState, questions, onResult
           align-items: center;
           gap: 6px;
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           cursor: pointer;
         }
 
@@ -245,14 +245,14 @@ export default function QuestionConsole({ round, roundState, questions, onResult
           gap: var(--space-sm);
           padding-bottom: var(--space-md);
           margin-bottom: var(--space-sm);
-          border-bottom: 1px solid rgba(36,184,175,0.1);
+          border-bottom: 1px solid rgba(242,183,5,0.1);
         }
 
         .qc-position {
           font-family: 'Poppins', sans-serif;
           font-size: 13px;
           font-weight: 600;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
           text-align: center;
         }
 
@@ -276,11 +276,11 @@ export default function QuestionConsole({ round, roundState, questions, onResult
           border: 1px solid transparent;
         }
 
-        .qc-item:hover { background: rgba(36,184,175,0.06); }
+        .qc-item:hover { background: rgba(242,183,5,0.06); }
 
         .qc-item--live {
-          border-color: var(--ocean-aqua);
-          background: rgba(36,184,175,0.1);
+          border-color: var(--spotlight-gold);
+          background: rgba(242,183,5,0.1);
         }
 
         .qc-num {
@@ -289,7 +289,7 @@ export default function QuestionConsole({ round, roundState, questions, onResult
           font-family: 'Poppins', sans-serif;
           font-weight: 600;
           font-size: 13px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .qc-text {
@@ -305,7 +305,7 @@ export default function QuestionConsole({ round, roundState, questions, onResult
         .qc-points {
           flex-shrink: 0;
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .qc-live-badge { flex-shrink: 0; }

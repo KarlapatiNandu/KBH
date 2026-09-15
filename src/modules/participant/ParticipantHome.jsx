@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { clearStoredParticipant } from './storage';
+import logo from '../../assets/logo.png';
 
 /**
  * Module 3 — Participant Home
@@ -92,8 +93,9 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
 
       {/* Title */}
       <div className="participant-home-title">
-        <h1>Kaun Banega Hazaarpati</h1>
-        <p className="participant-home-subtitle">Select your round to begin</p>
+        <img src={logo} alt="Kaun Banega Hazaarpati" className="participant-home-logo" />
+        <h1 className="sr-only">Kaun Banega Hazaarpati</h1>
+        <p className="participant-home-subtitle">Select your round to begin — stalling does not improve your odds</p>
       </div>
 
       {/* Flashcards */}
@@ -111,8 +113,8 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
             description="Answer questions as fast as you can. All participants play simultaneously — speed matters!"
             icon={
               <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-                <circle cx="18" cy="18" r="16" stroke="var(--ocean-aqua)" strokeWidth="2" fill="none" opacity="0.3" />
-                <path d="M18 10v8l5.5 3.3" stroke="var(--ocean-aqua)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="18" cy="18" r="16" stroke="var(--spotlight-gold)" strokeWidth="2" fill="none" opacity="0.3" />
+                <path d="M18 10v8l5.5 3.3" stroke="var(--spotlight-gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             }
             state={r1}
@@ -128,7 +130,7 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
             description={
               isHotSeat
                 ? "You've been selected for the Hot Seat! Get ready to answer."
-                : "One participant is chosen for the spotlight round."
+                : "One lucky (or terrified) participant gets the spotlight."
             }
             icon={
               <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
@@ -160,7 +162,7 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
           align-items: center;
           justify-content: space-between;
           padding-bottom: var(--space-lg);
-          border-bottom: 1px solid rgba(36,184,175,0.15);
+          border-bottom: 1px solid rgba(242,183,5,0.15);
           margin-bottom: var(--space-2xl);
         }
 
@@ -174,7 +176,7 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
           width: 40px;
           height: 40px;
           border-radius: 50%;
-          background: var(--ocean-aqua);
+          background: var(--spotlight-gold);
           color: var(--deep-midnight);
           font-family: 'Poppins', sans-serif;
           font-weight: 700;
@@ -199,27 +201,44 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
         .participant-roll {
           font-family: 'Inter', sans-serif;
           font-size: 12px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         /* Title */
         .participant-home-title {
           text-align: center;
           margin-bottom: var(--space-2xl);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
         }
 
-        .participant-home-title h1 {
-          font-family: 'Poppins', sans-serif;
-          font-size: 32px;
-          font-weight: 700;
-          color: var(--cloud-white);
-          margin-bottom: var(--space-sm);
+        .participant-home-logo {
+          width: clamp(180px, 38vw, 260px);
+          height: auto;
+          margin-bottom: var(--space-md);
+          filter:
+            drop-shadow(0 10px 28px rgba(0,0,0,0.5))
+            drop-shadow(0 0 40px rgba(242,183,5,0.4));
+        }
+
+        .sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+          border: 0;
         }
 
         .participant-home-subtitle {
           font-family: 'Inter', sans-serif;
           font-size: 15px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
+          text-shadow: 0 2px 8px rgba(0,0,0,0.6);
         }
 
         /* Round cards */
@@ -233,7 +252,7 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
         .participant-loading {
           text-align: center;
           padding: var(--space-2xl) 0;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -244,7 +263,7 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
           width: 32px;
           height: 32px;
           border: 3px solid transparent;
-          border-top-color: var(--ocean-aqua);
+          border-top-color: var(--spotlight-gold);
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
         }
@@ -257,10 +276,6 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
         @media (max-width: 480px) {
           .participant-home {
             padding: var(--space-md);
-          }
-
-          .participant-home-title h1 {
-            font-size: 24px;
           }
         }
       `}</style>
@@ -305,16 +320,16 @@ function RoundCard({ round, title, description, icon, state, canEnter, statusLab
 
       <style>{`
         .round-card {
-          background: linear-gradient(135deg, rgba(16,43,86,0.92) 0%, rgba(32,76,188,0.88) 100%);
-          border: 1.5px solid rgba(36,184,175,0.15);
+          background: linear-gradient(135deg, rgba(11,20,64,0.92) 0%, rgba(52,24,104,0.88) 100%);
+          border: 1.5px solid rgba(242,183,5,0.15);
           border-radius: var(--radius-lg);
           padding: var(--space-lg) 28px 28px;
           transition: all 0.3s ease;
         }
 
         .round-card--active {
-          border-color: var(--ocean-aqua);
-          box-shadow: 0 0 24px rgba(36,184,175,0.15);
+          border-color: var(--spotlight-gold);
+          box-shadow: 0 0 24px rgba(242,183,5,0.15);
         }
 
         .round-card--active.round-card--hotseat {
@@ -358,7 +373,7 @@ function RoundCard({ round, title, description, icon, state, canEnter, statusLab
           font-weight: 500;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .round-card-title {

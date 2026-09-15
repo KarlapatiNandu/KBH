@@ -25,6 +25,7 @@ export default function ParticipantImport() {
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
+  const [revealedPins, setRevealedPins] = useState(new Set());
 
   useEffect(() => {
     fetchParticipants();
@@ -162,7 +163,7 @@ export default function ParticipantImport() {
 
     const { error } = await supabase
       .from('participants')
-      .update({ pin_hash: null })
+      .update({ pin: null })
       .eq('id', p.id);
 
     if (error) {
@@ -171,6 +172,14 @@ export default function ParticipantImport() {
       showToast(`PIN reset for ${p.roll_no}`);
       fetchParticipants();
     }
+  };
+
+  const togglePinReveal = (id) => {
+    setRevealedPins((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
   const filteredParticipants = participants.filter((p) => {
@@ -231,7 +240,7 @@ export default function ParticipantImport() {
                   ))}
                   {csvPreview.length > 20 && (
                     <tr>
-                      <td colSpan={3} style={{ textAlign: 'center', color: 'var(--serene-seafoam)' }}>
+                      <td colSpan={3} style={{ textAlign: 'center', color: 'var(--pale-gold)' }}>
                         …and {csvPreview.length - 20} more
                       </td>
                     </tr>
@@ -260,7 +269,7 @@ export default function ParticipantImport() {
           <div className="pi-loading">Loading participants…</div>
         ) : filteredParticipants.length === 0 ? (
           <div className="pi-empty">
-            {search ? 'No matches found.' : 'No participants yet. Import via CSV above.'}
+            {search ? 'No matches found.' : "No participants yet — it's a ghost town. Import a CSV above."}
           </div>
         ) : (
           <div className="pi-table-wrap">
@@ -271,7 +280,7 @@ export default function ParticipantImport() {
                   <th>Roll No</th>
                   <th>Name</th>
                   <th>Network</th>
-                  <th>PIN Status</th>
+                  <th>PIN</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -303,9 +312,17 @@ export default function ParticipantImport() {
                         </span>
                       </td>
                       <td>
-                        <span className={`badge ${p.pin_hash ? 'badge--active' : 'badge--pending'}`}>
-                          {p.pin_hash ? 'Claimed' : 'Unclaimed'}
-                        </span>
+                        {p.pin ? (
+                          <button
+                            className="pi-pin-reveal"
+                            onClick={() => togglePinReveal(p.id)}
+                            title={revealedPins.has(p.id) ? 'Hide PIN' : 'Show PIN'}
+                          >
+                            {revealedPins.has(p.id) ? p.pin : '••••'}
+                          </button>
+                        ) : (
+                          <span className="badge badge--pending">Unclaimed</span>
+                        )}
                       </td>
                       <td className="pi-actions">
                         <button
@@ -319,7 +336,7 @@ export default function ParticipantImport() {
                           className="btn-icon"
                           onClick={() => resetPin(p)}
                           title="Reset PIN"
-                          disabled={!p.pin_hash}
+                          disabled={!p.pin}
                         >
                           🔑
                         </button>
@@ -353,6 +370,24 @@ export default function ParticipantImport() {
           font-weight: 600;
         }
 
+        .pi-pin-reveal {
+          border: 1px solid rgba(242,183,5,0.2);
+          background: rgba(242,183,5,0.08);
+          color: var(--spotlight-gold);
+          font-family: 'Poppins', sans-serif;
+          font-weight: 600;
+          font-size: 13px;
+          letter-spacing: 0.5px;
+          padding: 4px 10px;
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          min-width: 52px;
+        }
+
+        .pi-pin-reveal:hover {
+          background: rgba(242,183,5,0.16);
+        }
+
         .pi-actions {
           display: flex;
           align-items: center;
@@ -372,17 +407,17 @@ export default function ParticipantImport() {
 
         .pi-import-help {
           font-size: 13px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           margin-bottom: var(--space-md);
           line-height: 1.5;
         }
 
         .pi-import-help code {
-          background: rgba(36,184,175,0.12);
+          background: rgba(242,183,5,0.12);
           padding: 2px 6px;
           border-radius: 4px;
           font-size: 12px;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
         }
 
         .pi-import-row {
@@ -397,7 +432,7 @@ export default function ParticipantImport() {
 
         .pi-preview {
           margin-top: var(--space-md);
-          border-top: 1px solid rgba(36,184,175,0.15);
+          border-top: 1px solid rgba(242,183,5,0.15);
           padding-top: var(--space-md);
         }
 
@@ -414,7 +449,7 @@ export default function ParticipantImport() {
           font-family: 'Poppins', sans-serif;
           font-weight: 600;
           font-size: 14px;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
         }
 
         .pi-preview-actions {
@@ -453,13 +488,13 @@ export default function ParticipantImport() {
           max-height: 500px;
           overflow-y: auto;
           border-radius: var(--radius-md);
-          border: 1px solid rgba(36,184,175,0.1);
+          border: 1px solid rgba(242,183,5,0.1);
         }
 
         .pi-loading, .pi-empty {
           text-align: center;
           padding: var(--space-2xl);
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
           font-size: 15px;
         }
       `}</style>

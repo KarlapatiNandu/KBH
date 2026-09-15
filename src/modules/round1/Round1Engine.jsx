@@ -329,8 +329,8 @@ export default function Round1Engine({ participant }) {
         <div className="r1-center">
           <div className="r1-waiting-icon">
             <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-              <circle cx="32" cy="32" r="28" stroke="var(--ocean-aqua)" strokeWidth="3" fill="none" opacity="0.3" />
-              <path d="M32 18v14l10 6" stroke="var(--ocean-aqua)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="32" cy="32" r="28" stroke="var(--spotlight-gold)" strokeWidth="3" fill="none" opacity="0.3" />
+              <path d="M32 18v14l10 6" stroke="var(--spotlight-gold)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
           <h2 className="r1-waiting-title">Fastest Finger First</h2>
@@ -459,7 +459,7 @@ function Round1Styles() {
         width: 28px;
         height: 28px;
         border: 3px solid transparent;
-        border-top-color: var(--ocean-aqua);
+        border-top-color: var(--spotlight-gold);
         border-radius: 50%;
         animation: r1spin 0.8s linear infinite;
       }
@@ -471,7 +471,7 @@ function Round1Styles() {
       .r1-status-text {
         font-family: 'Inter', sans-serif;
         font-size: 16px;
-        color: var(--serene-seafoam);
+        color: var(--pale-gold);
       }
 
       /* Waiting */
@@ -499,7 +499,7 @@ function Round1Styles() {
       .r1-pulse-dots span {
         width: 8px;
         height: 8px;
-        background: var(--ocean-aqua);
+        background: var(--spotlight-gold);
         border-radius: 50%;
         animation: r1dotPulse 1.4s ease-in-out infinite;
       }
@@ -535,7 +535,7 @@ function Round1Styles() {
         justify-content: space-between;
         margin-bottom: var(--space-xl);
         padding-bottom: var(--space-md);
-        border-bottom: 1px solid rgba(36,184,175,0.15);
+        border-bottom: 1px solid rgba(242,183,5,0.15);
       }
 
       .r1-header-title {
@@ -585,12 +585,12 @@ function Round1Styles() {
         gap: var(--space-md);
         padding: 14px 24px;
         background: var(--deep-midnight);
-        border: 1px solid var(--twilight-teal);
+        border: 1px solid var(--antique-gold);
         border-radius: var(--radius-pill);
         box-shadow: var(--shadow-card);
         font-family: 'Inter', sans-serif;
         font-size: 14px;
-        color: var(--ocean-aqua);
+        color: var(--spotlight-gold);
         z-index: 100;
         animation: r1transIn 0.3s ease;
       }

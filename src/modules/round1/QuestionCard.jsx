@@ -142,15 +142,15 @@ export default function QuestionCard({
           font-family: 'Inter', sans-serif;
           font-size: 13px;
           font-weight: 500;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         .qc-points {
           font-family: 'Inter', sans-serif;
           font-size: 12px;
           font-weight: 600;
-          color: var(--ocean-aqua);
-          background: rgba(36,184,175,0.12);
+          color: var(--spotlight-gold);
+          background: rgba(242,183,5,0.12);
           padding: 3px 10px;
           border-radius: var(--radius-pill);
         }
@@ -168,7 +168,7 @@ export default function QuestionCard({
 
         .qc-pill:not(:disabled):hover {
           transform: translateY(-1px);
-          box-shadow: 0 2px 12px rgba(36,184,175,0.15);
+          box-shadow: 0 2px 12px rgba(242,183,5,0.15);
         }
 
         .qc-option-text {
@@ -260,7 +260,7 @@ export default function QuestionCard({
         .qc-result-detail {
           font-family: 'Inter', sans-serif;
           font-size: 13px;
-          color: var(--serene-seafoam);
+          color: var(--pale-gold);
         }
 
         @keyframes resultSlideIn {
@@ -272,14 +272,14 @@ export default function QuestionCard({
         .qc-submitting {
           position: absolute;
           inset: 0;
-          background: rgba(16,43,86,0.85);
+          background: rgba(11,20,64,0.85);
           display: flex;
           align-items: center;
           justify-content: center;
           gap: var(--space-sm);
           font-family: 'Inter', sans-serif;
           font-size: 15px;
-          color: var(--ocean-aqua);
+          color: var(--spotlight-gold);
           border-radius: var(--radius-lg);
           z-index: 5;
         }
@@ -287,7 +287,7 @@ export default function QuestionCard({
         .qc-submitting-dot {
           width: 8px;
           height: 8px;
-          background: var(--ocean-aqua);
+          background: var(--spotlight-gold);
           border-radius: 50%;
           animation: dotPulse 0.8s ease-in-out infinite;
         }

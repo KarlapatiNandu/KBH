@@ -79,7 +79,20 @@ export default function App() {
   }, []);
 
   if (loading) {
-    return <div style={{ padding: '2rem', textAlign: 'center', color: '#A8E6CF' }}>Starting up...</div>;
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        textAlign: 'center',
+        color: 'var(--pale-gold)',
+        background: 'var(--deep-midnight)',
+      }}>
+        Warming up the studio lights…
+      </div>
+    );
   }
 
   const needsNetworkCheck = participant && !networkChecked;
@@ -248,7 +261,7 @@ function NotFound() {
       textAlign: 'center',
     }}>
       <h1 style={{ fontFamily: "'Poppins', sans-serif", fontSize: '28px' }}>Page not found</h1>
-      <p style={{ color: 'var(--serene-seafoam)' }}>
+      <p style={{ color: 'var(--pale-gold)' }}>
         That link doesn’t lead anywhere in this quiz.
       </p>
       <Link to="/" className="btn btn-primary" style={{ marginTop: '8px' }}>

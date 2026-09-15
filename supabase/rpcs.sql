@@ -446,8 +446,8 @@ $$;
 
 -- ─── claim_or_verify_pin ────────────────────────────────────
 -- Module 3 participant login.
--- If pin_hash is null → claim (hash & save), return participant_id.
--- If pin_hash exists → compare, return participant_id on match, error on mismatch.
+-- If pin is null → claim (save raw), return participant_id.
+-- If pin is set  → compare, return participant_id on match, error on mismatch.
 CREATE OR REPLACE FUNCTION claim_or_verify_pin(
   p_roll_no TEXT,
   p_pin     TEXT
@@ -459,7 +459,6 @@ SET search_path = public, extensions
 AS $$
 DECLARE
   v_participant RECORD;
-  v_hash        TEXT;
 BEGIN
   SELECT * INTO v_participant FROM participants WHERE roll_no = p_roll_no;
 
@@ -467,10 +466,9 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Roll number not found');
   END IF;
 
-  IF v_participant.pin_hash IS NULL THEN
+  IF v_participant.pin IS NULL THEN
     -- First login: claim this PIN
-    v_hash := crypt(p_pin, gen_salt('bf'));
-    UPDATE participants SET pin_hash = v_hash WHERE id = v_participant.id;
+    UPDATE participants SET pin = p_pin WHERE id = v_participant.id;
     RETURN jsonb_build_object(
       'success', true,
       'participant_id', v_participant.id,
@@ -479,7 +477,7 @@ BEGIN
     );
   ELSE
     -- Verify existing PIN
-    IF v_participant.pin_hash = crypt(p_pin, v_participant.pin_hash) THEN
+    IF v_participant.pin = p_pin THEN
       RETURN jsonb_build_object(
         'success', true,
         'participant_id', v_participant.id,

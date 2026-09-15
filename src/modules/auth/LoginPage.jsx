@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { storeParticipant } from '../participant/storage';
+import logo from '../../assets/logo.png';
 
 /**
  * Unified login (R1)
@@ -25,26 +26,13 @@ export default function LoginPage({ onParticipantLogin, onAdminLogin, initialTab
 
   return (
     <div className="login-page">
-      <div className="login-page-card card card--solid">
-        <header className="login-page-header">
-          <div className="login-page-logo">
-            <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
-              <circle cx="28" cy="28" r="26" stroke="var(--ocean-aqua)" strokeWidth="2" fill="none" />
-              <text
-                x="28" y="34"
-                textAnchor="middle"
-                fontFamily="Poppins, sans-serif"
-                fontWeight="700"
-                fontSize="22"
-                fill="var(--ocean-aqua)"
-              >
-                ₹
-              </text>
-            </svg>
-          </div>
-          <h1 className="login-page-title">Kaun Banega<br />Hazaarpati</h1>
-        </header>
+      <div className="login-hero">
+        <img src={logo} alt="Kaun Banega Hazaarpati" className="login-hero-logo" />
+        <h1 className="sr-only">Kaun Banega Hazaarpati</h1>
+        <p className="login-hero-tagline">Lock kiya jaaye? No pressure — it's only your entire reputation on the line.</p>
+      </div>
 
+      <div className="login-page-card card card--solid">
         {/* Role switch */}
         <div className="login-tabs" role="tablist">
           <button
@@ -167,14 +155,14 @@ function ParticipantForm({ onSuccess }) {
             ? `Welcome, ${success.name}! PIN set successfully.`
             : `Welcome back, ${success.name}!`}
         </p>
-        <p className="login-success-sub">Running network check…</p>
+        <p className="login-success-sub">Running network check… fingers crossed for good WiFi karma.</p>
       </div>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="login-form">
-      <p className="login-form-hint">Enter your roll number and PIN to begin</p>
+      <p className="login-form-hint">Enter your roll number and PIN to begin — no autographs required</p>
 
       <div className="form-group">
         <label className="form-label" htmlFor="participant-roll">Roll Number</label>
@@ -204,7 +192,7 @@ function ParticipantForm({ onSuccess }) {
           inputMode="numeric"
           autoComplete="off"
         />
-        <p className="login-pin-hint">First time? Your PIN will be saved for future logins.</p>
+        <p className="login-pin-hint">First time? Whatever you type becomes your PIN — choose wisely, there are no do-overs.</p>
       </div>
 
       {error && <LoginError message={error} />}
@@ -245,6 +233,11 @@ function AdminForm({ onSuccess }) {
           setError('Wrong email or password for this admin account.');
         } else if (authError.code === 'email_not_confirmed') {
           setError('This admin account is not confirmed yet — confirm it in Supabase → Authentication → Users.');
+        } else if (authError.code === 'weak_password') {
+          // The credentials are correct, but Supabase's password-strength policy
+          // rejects the sign-in outright and withholds the session — the raw
+          // error otherwise dumps the full response JSON into the UI.
+          setError('This admin account\'s password no longer meets the project\'s password policy and can\'t be used to sign in. Reset it in Supabase → Authentication → Users.');
         } else {
           setError(authError.message);
         }
@@ -263,7 +256,7 @@ function AdminForm({ onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} className="login-form">
-      <p className="login-form-hint">Host controls — questions, rounds and the live dashboard</p>
+      <p className="login-form-hint">Host controls — questions, rounds, and the live dashboard. Power responsibly.</p>
 
       <div className="form-group">
         <label className="form-label" htmlFor="admin-email">Email</label>
@@ -323,9 +316,50 @@ function LoginPageStyles() {
       .login-page {
         min-height: 100vh;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
         padding: var(--space-xl);
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* Hero — the logo is the centerpiece, everything else supports it */
+      .login-hero {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        margin-bottom: var(--space-lg);
+      }
+
+      .login-hero-logo {
+        width: clamp(260px, 55vw, 480px);
+        height: auto;
+        filter:
+          drop-shadow(0 16px 40px rgba(0,0,0,0.5))
+          drop-shadow(0 0 60px rgba(242,183,5,0.45));
+      }
+
+      .login-hero-tagline {
+        font-family: 'Inter', sans-serif;
+        font-size: 14px;
+        font-style: italic;
+        color: var(--pale-gold);
+        margin-top: var(--space-sm);
+        max-width: 380px;
+        opacity: 0.9;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.6);
       }
 
       .login-page-card {
@@ -334,36 +368,13 @@ function LoginPageStyles() {
         padding: 40px;
       }
 
-      .login-page-header {
-        text-align: center;
-        margin-bottom: var(--space-lg);
-      }
-
-      .login-page-logo {
-        margin-bottom: var(--space-md);
-        animation: loginLogoPulse 2s ease-in-out infinite;
-      }
-
-      @keyframes loginLogoPulse {
-        0%, 100% { transform: scale(1); opacity: 1; }
-        50%      { transform: scale(1.05); opacity: 0.9; }
-      }
-
-      .login-page-title {
-        font-family: 'Poppins', sans-serif;
-        font-weight: 700;
-        font-size: 28px;
-        line-height: 1.2;
-        color: var(--cloud-white);
-      }
-
       /* Role tabs */
       .login-tabs {
         display: flex;
         gap: 4px;
         padding: 4px;
-        background: rgba(16, 43, 86, 0.6);
-        border: 1px solid rgba(36,184,175,0.15);
+        background: rgba(11,20,64, 0.6);
+        border: 1px solid rgba(242,183,5,0.15);
         border-radius: var(--radius-pill);
         margin-bottom: var(--space-lg);
       }
@@ -385,7 +396,7 @@ function LoginPageStyles() {
       .login-tab:hover { color: var(--cloud-white); }
 
       .login-tab--active {
-        background: var(--ocean-aqua);
+        background: var(--spotlight-gold);
         color: var(--deep-midnight);
       }
 
@@ -399,7 +410,7 @@ function LoginPageStyles() {
       .login-form-hint {
         font-family: 'Inter', sans-serif;
         font-size: 14px;
-        color: var(--serene-seafoam);
+        color: var(--pale-gold);
         text-align: center;
         margin-bottom: var(--space-xs);
       }
@@ -481,12 +492,12 @@ function LoginPageStyles() {
       .login-success-sub {
         font-family: 'Inter', sans-serif;
         font-size: 13px;
-        color: var(--serene-seafoam);
+        color: var(--pale-gold);
       }
 
       @media (max-width: 480px) {
         .login-page-card { padding: 32px 24px; }
-        .login-page-title { font-size: 24px; }
+        .login-hero { margin-bottom: var(--space-md); }
       }
     `}</style>
   );
