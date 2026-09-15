@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, Link } from 'react-router-dom';
-import { supabase } from './lib/supabase';
 
 // Styles
 import './modules/shared/styles.css';
@@ -10,6 +9,7 @@ import LoginPage from './modules/auth/LoginPage';
 
 // Admin Modules
 import AdminLayout from './modules/admin/AdminLayout';
+import { getStoredAdmin, clearStoredAdmin } from './modules/admin/storage';
 
 // Participant Modules (Module 3)
 import {
@@ -26,8 +26,9 @@ import { Round1Engine } from './modules/round1';
 import { Round2Engine } from './modules/round2';
 
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Admin state — a plain localStorage identity, same as participants.
+  // See modules/admin/storage.js.
+  const [admin, setAdmin] = useState(() => getStoredAdmin());
 
   // Participant state (Module 3)
   const [participant, setParticipant] = useState(() => getStoredParticipant());
@@ -38,30 +39,13 @@ export default function App() {
     return stored ? hasCompletedNetworkCheck(stored.participant_id) : false;
   });
 
-  useEffect(() => {
-    // A stored admin session whose refresh token has expired or been used
-    // makes getSession() POST /auth/v1/token?grant_type=refresh_token, which
-    // answers 400 ("Refresh token is not valid"). supabase-js keeps the dead
-    // token in localStorage, so that 400 reappears on every reload and looks
-    // exactly like a failed sign-in in the console. Clear it once, here.
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        console.warn('Discarding stale Supabase session:', error.message);
-        supabase.auth.signOut().catch(() => {});
-        setSession(null);
-      } else {
-        setSession(session);
-      }
-      setLoading(false);
-    });
+  const handleAdminLogin = useCallback((a) => {
+    setAdmin(a);
+  }, []);
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
+  const handleAdminLogout = useCallback(() => {
+    clearStoredAdmin();
+    setAdmin(null);
   }, []);
 
   const handleParticipantLogin = useCallback((p) => {
@@ -78,23 +62,6 @@ export default function App() {
     setNetworkChecked(true);
   }, []);
 
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '2rem',
-        textAlign: 'center',
-        color: 'var(--pale-gold)',
-        background: 'var(--deep-midnight)',
-      }}>
-        Warming up the studio lights…
-      </div>
-    );
-  }
-
   const needsNetworkCheck = participant && !networkChecked;
 
   return (
@@ -104,13 +71,13 @@ export default function App() {
         <Route
           path="/admin/login"
           element={
-            session ? (
+            admin ? (
               <Navigate to="/admin" replace />
             ) : (
               <LoginPage
                 initialTab="admin"
                 onParticipantLogin={handleParticipantLogin}
-                onAdminLogin={setSession}
+                onAdminLogin={handleAdminLogin}
               />
             )
           }
@@ -120,8 +87,8 @@ export default function App() {
         <Route
           path="/admin/*"
           element={
-            session ? (
-              <AdminLayout session={session} onLogout={() => setSession(null)} />
+            admin ? (
+              <AdminLayout admin={admin} onLogout={handleAdminLogout} />
             ) : (
               <Navigate to="/admin/login" replace />
             )
@@ -179,7 +146,7 @@ export default function App() {
               <LoginPage
                 initialTab="participant"
                 onParticipantLogin={handleParticipantLogin}
-                onAdminLogin={setSession}
+                onAdminLogin={handleAdminLogin}
               />
             ) : needsNetworkCheck ? (
               <Navigate to="/network-check" replace />

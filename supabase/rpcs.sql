@@ -492,6 +492,42 @@ END;
 $$;
 
 
+-- ─── verify_admin ───────────────────────────────────────────
+-- Custom admin login, checked against the `admins` table instead of
+-- Supabase Auth. Same shape as claim_or_verify_pin: distinct errors for
+-- "no such user" vs "wrong password" rather than one generic message,
+-- matching the participant login's style.
+CREATE OR REPLACE FUNCTION verify_admin(
+  p_username TEXT,
+  p_password TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_admin RECORD;
+BEGIN
+  SELECT * INTO v_admin FROM admins WHERE username = p_username;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Username not found');
+  END IF;
+
+  IF v_admin.password != p_password THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Incorrect password');
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'admin_id', v_admin.id,
+    'username', v_admin.username
+  );
+END;
+$$;
+
+
 -- ─── start_round ────────────────────────────────────────────
 -- Called by the admin to start a round. Uses server time (now()).
 -- Starts at the round's LOWEST order_index rather than a hardcoded 0,

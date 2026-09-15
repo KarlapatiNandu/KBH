@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { storeParticipant } from '../participant/storage';
+import { storeAdmin } from '../admin/storage';
 import logo from '../../assets/logo.png';
 
 /**
@@ -9,15 +10,15 @@ import logo from '../../assets/logo.png';
  * One page, two tabs:
  *   - Participant — roll_no + PIN via the `claim_or_verify_pin` RPC.
  *     Claims the PIN on first login, verifies it afterwards.
- *   - Admin       — email + password via Supabase Auth.
+ *   - Admin       — username + password via the `verify_admin` RPC.
  *
- * The two auth mechanisms stay separate underneath; only the entry point
- * is shared. `/admin/login` renders this same page with the Admin tab
- * preselected.
+ * Neither tab uses Supabase Auth — both check a plain table through a
+ * SECURITY DEFINER RPC and keep the resulting identity in localStorage.
+ * `/admin/login` renders this same page with the Admin tab preselected.
  *
  * Props:
  *   onParticipantLogin(participant) — participant signed in
- *   onAdminLogin(session)           — admin signed in
+ *   onAdminLogin(admin)              — admin signed in
  *   initialTab                      — 'participant' | 'admin'
  */
 
@@ -208,7 +209,7 @@ function ParticipantForm({ onSuccess }) {
 /* ===== Admin tab ===== */
 
 function AdminForm({ onSuccess }) {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -219,36 +220,26 @@ function AdminForm({ onSuccess }) {
     setLoading(true);
 
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const { data, error: rpcError } = await supabase.rpc('verify_admin', {
+        p_username: username.trim(),
+        p_password: password,
       });
 
-      if (authError) {
-        // Supabase answers 400 for both "wrong email/password" and "account
-        // exists but is unconfirmed". The raw messages are terse enough that
-        // the console status code is easier to read than the UI, so say which
-        // one it is.
-        if (authError.code === 'invalid_credentials') {
-          setError('Wrong email or password for this admin account.');
-        } else if (authError.code === 'email_not_confirmed') {
-          setError('This admin account is not confirmed yet — confirm it in Supabase → Authentication → Users.');
-        } else if (authError.code === 'weak_password') {
-          // The credentials are correct, but Supabase's password-strength policy
-          // rejects the sign-in outright and withholds the session — the raw
-          // error otherwise dumps the full response JSON into the UI.
-          setError('This admin account\'s password no longer meets the project\'s password policy and can\'t be used to sign in. Reset it in Supabase → Authentication → Users.');
-        } else {
-          setError(authError.message);
-        }
+      if (rpcError) {
+        setError(rpcError.message || 'Server error. Please try again.');
         return;
       }
 
-      if (data.session) {
-        onSuccess(data.session);
+      if (!data.success) {
+        setError(data.error || 'Login failed');
+        return;
       }
+
+      const admin = { admin_id: data.admin_id, username: data.username };
+      storeAdmin(admin);
+      onSuccess(admin);
     } catch {
-      setError('An unexpected error occurred');
+      setError('Network error. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -259,14 +250,14 @@ function AdminForm({ onSuccess }) {
       <p className="login-form-hint">Host controls — questions, rounds, and the live dashboard. Power responsibly.</p>
 
       <div className="form-group">
-        <label className="form-label" htmlFor="admin-email">Email</label>
+        <label className="form-label" htmlFor="admin-username">Username</label>
         <input
-          id="admin-email"
-          type="email"
+          id="admin-username"
+          type="text"
           className="form-input"
-          placeholder="admin@gmail.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          placeholder="admin"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           required
           autoFocus
           autoComplete="username"

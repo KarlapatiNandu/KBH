@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS participants (
 
 CREATE INDEX IF NOT EXISTS idx_participants_roll_no ON participants (roll_no);
 
+-- ─── admins ─────────────────────────────────────────────────
+-- Custom admin login, checked via the verify_admin RPC — not Supabase
+-- Auth. No RLS policy grants anon direct access to this table; it's only
+-- reachable through the SECURITY DEFINER RPC, which bypasses RLS. That
+-- keeps admin credentials off the open anon-key surface even though
+-- participants/questions/round_state are fully open below.
+CREATE TABLE IF NOT EXISTS admins (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username    TEXT UNIQUE NOT NULL,
+  password    TEXT NOT NULL,                 -- stored raw, same tradeoff as participants.pin
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
 -- ─── questions ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS questions (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -81,52 +94,53 @@ ALTER TABLE participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE questions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE round_state  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE responses    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins       ENABLE ROW LEVEL SECURITY;
 
--- Allow authenticated users (admin) full access
+-- No admin login is minted via Supabase Auth anymore (verify_admin checks
+-- the admins table directly), so `auth.role() = 'authenticated'` never
+-- happens in this app. Admin access is instead the anon key wide open on
+-- these three tables — the admin console gates itself client-side (see
+-- LoginPage.jsx) rather than at the database. Fine for a hobby project,
+-- but note: anyone with the anon key (visible in any browser's network
+-- tab) can read/write these tables directly, login screen or not.
 DROP POLICY IF EXISTS "Admin full access on participants" ON participants;
-CREATE POLICY "Admin full access on participants" ON participants
-  FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Open access on participants" ON participants
+  FOR ALL USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Admin full access on questions" ON questions;
-CREATE POLICY "Admin full access on questions" ON questions
-  FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Open access on questions" ON questions
+  FOR ALL USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Admin full access on round_state" ON round_state;
-CREATE POLICY "Admin full access on round_state" ON round_state
-  FOR ALL USING (auth.role() = 'authenticated');
-DROP POLICY IF EXISTS "Admin full access on responses" ON responses;
-CREATE POLICY "Admin full access on responses" ON responses
-  FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Open access on round_state" ON round_state
+  FOR ALL USING (true) WITH CHECK (true);
 
--- Allow anonymous reads for participant-facing queries
-DROP POLICY IF EXISTS "Anon read questions" ON questions;
-CREATE POLICY "Anon read questions" ON questions
-  FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Anon read round_state" ON round_state;
-CREATE POLICY "Anon read round_state" ON round_state
-  FOR SELECT USING (true);
-DROP POLICY IF EXISTS "Anon read participants (own)" ON participants;
-CREATE POLICY "Anon read participants (own)" ON participants
-  FOR SELECT USING (true);
+-- `responses` stays read-only for anon. Every legitimate write goes
+-- through the submit_response RPC (SECURITY DEFINER, bypasses RLS
+-- entirely), and no admin screen writes to this table directly — so unlike
+-- the three tables above, there's no reason to open INSERT/UPDATE/DELETE
+-- here. Doing so would let anyone write themselves a perfect score
+-- directly via the REST API, which is a real cheating vector, not just a
+-- data-access nicety like the tables above.
+DROP POLICY IF EXISTS "Admin full access on responses" ON responses;
 DROP POLICY IF EXISTS "Anon read responses" ON responses;
 CREATE POLICY "Anon read responses" ON responses
   FOR SELECT USING (true);
 
--- Hide pin from anonymous clients (ISSUES 1.5).
--- RLS is row-level; column-level grants are the tool for this.
---
--- `REVOKE SELECT (pin)` alone does NOT work: while a role still holds
--- the table-level SELECT grant, Postgres cannot subtract a single column
--- from it — it emits "no privileges could be revoked" and the column stays
--- readable. The table grant has to go first, then the allowed columns come
--- back individually.
---
--- Every anonymous read of `participants` in the app names its columns
--- explicitly; only the admin Participants tab does `select('*')`, and that
--- runs as `authenticated`, which keeps full access.
-REVOKE SELECT ON participants FROM anon;
-GRANT  SELECT (id, roll_no, name, created_at,
-               network_status, network_checked_at,
-               network_latency_ms, network_detail)
-  ON participants TO anon;
+-- The old per-table "Anon read ..." policies are now redundant — "Open
+-- access on ..." above is FOR ALL, so it already covers SELECT. Dropped
+-- rather than left in place as dead duplicates.
+DROP POLICY IF EXISTS "Anon read questions" ON questions;
+DROP POLICY IF EXISTS "Anon read round_state" ON round_state;
+DROP POLICY IF EXISTS "Anon read participants (own)" ON participants;
+
+-- admins: deliberately NO policy grants anon anything here. RLS with zero
+-- permissive policies denies all access by default — the only way in is
+-- the SECURITY DEFINER verify_admin RPC, which bypasses RLS as the
+-- function owner regardless of the caller's role.
+
+-- participants.pin no longer needs the column-level grant dance from
+-- earlier — "Open access on participants" already covers full-column
+-- SELECT for anon (including pin), which the admin's `select('*')` now
+-- relies on since it's not running as `authenticated` anymore.
 
 -- Enable realtime for round_state, responses and participants
 -- (participants so failed network checks surface live in the admin list)

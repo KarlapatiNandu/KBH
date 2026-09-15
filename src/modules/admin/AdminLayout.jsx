@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { supabase } from '../../lib/supabase';
 import QuestionManager from './QuestionManager';
 import ParticipantImport from './ParticipantImport';
 import RoundControl from './RoundControl';
@@ -13,11 +12,10 @@ const NAV_ITEMS = [
   { key: 'rounds', label: 'Round Control', icon: '🎮' },
 ];
 
-export default function AdminLayout({ session, onLogout }) {
+export default function AdminLayout({ admin, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
     onLogout();
   };
 
@@ -58,7 +56,7 @@ export default function AdminLayout({ session, onLogout }) {
 
         <div className="sidebar-footer">
           <div className="sidebar-user">
-            <span className="user-email">{session?.user?.email || 'Admin'}</span>
+            <span className="user-email">{admin?.username || 'Admin'}</span>
           </div>
           <button className="btn btn-secondary btn-sm sidebar-logout" onClick={handleLogout}>
             Sign Out
