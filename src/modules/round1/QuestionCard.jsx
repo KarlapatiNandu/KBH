@@ -13,6 +13,8 @@ import { useState } from 'react';
  *   onAnswer(index) — callback when an option is selected
  *   disabled        — true after answering or time's up
  *   lastResult      — {is_correct, points_awarded, response_time_ms} or null
+ *   revealed        — true once the countdown has ended; until then a pick
+ *                     only lights the option gold and the verdict is hidden
  *   selectedOption  — the index the user picked (or null)
  */
 
@@ -25,6 +27,7 @@ export default function QuestionCard({
   onAnswer,
   disabled,
   lastResult,
+  revealed = false,
   selectedOption,
 }) {
   const [submitting, setSubmitting] = useState(false);
@@ -36,6 +39,10 @@ export default function QuestionCard({
     setSubmitting(false);
   };
 
+  // Reveal is gated on the countdown, not on the pick: the verdict only
+  // lands once the timer runs out.
+  const showVerdict = revealed && lastResult !== null;
+
   // Derive pill styling based on state
   const getPillClass = (index) => {
     const classes = ['pill', 'qc-pill'];
@@ -45,8 +52,7 @@ export default function QuestionCard({
       return classes.join(' ');
     }
 
-    // After answering — show feedback
-    if (lastResult) {
+    if (showVerdict) {
       if (index === question.correct_option) {
         classes.push('qc-pill--correct');
       } else if (index === selectedOption && !lastResult.is_correct) {
@@ -55,7 +61,10 @@ export default function QuestionCard({
         classes.push('qc-pill--faded');
       }
     } else if (index === selectedOption) {
-      classes.push('pill--selected');
+      // Locked in, verdict pending — the gold highlight
+      classes.push('qc-pill--locked');
+    } else {
+      classes.push('qc-pill--dimmed');
     }
 
     return classes.join(' ');
@@ -87,18 +96,26 @@ export default function QuestionCard({
             <span className="pill-num">{OPTION_LABELS[index]}</span>
             <span className="qc-option-text">{option}</span>
             {/* Feedback icon */}
-            {lastResult && index === question.correct_option && (
+            {showVerdict && index === question.correct_option && (
               <span className="qc-feedback-icon qc-feedback-icon--correct">✓</span>
             )}
-            {lastResult && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
+            {showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
               <span className="qc-feedback-icon qc-feedback-icon--wrong">✗</span>
             )}
           </button>
         ))}
       </div>
 
+      {/* Locked in, waiting on the countdown */}
+      {selectedOption !== null && !showVerdict && (
+        <div className="qc-locked-note">
+          <span className="qc-locked-dot" />
+          Answer locked in — revealed when the timer ends
+        </div>
+      )}
+
       {/* Result feedback */}
-      {lastResult && (
+      {showVerdict && (
         <div className={`qc-result ${lastResult.is_correct ? 'qc-result--correct' : 'qc-result--wrong'}`}>
           <span className="qc-result-icon">
             {lastResult.is_correct ? '🎯' : '❌'}
@@ -173,6 +190,57 @@ export default function QuestionCard({
 
         .qc-option-text {
           flex: 1;
+        }
+
+        /* Locked in: the gold graphic that marks the chosen option while
+           the countdown finishes running. */
+        .qc-pill--locked {
+          background: linear-gradient(180deg, var(--champagne-gold) 0%, var(--spotlight-gold) 55%, var(--amber-glow) 100%) !important;
+          border-color: var(--champagne-gold) !important;
+          color: var(--deep-midnight) !important;
+          font-weight: 600;
+          opacity: 1 !important;
+          box-shadow: 0 0 0 2px rgba(242,183,5,0.28), 0 4px 18px rgba(242,183,5,0.35);
+          animation: qcLockedGlow 1.6s ease-in-out infinite;
+        }
+
+        .qc-pill--locked .pill-num {
+          background: var(--deep-midnight);
+          color: var(--spotlight-gold);
+        }
+
+        @keyframes qcLockedGlow {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(242,183,5,0.28), 0 4px 18px rgba(242,183,5,0.30); }
+          50%      { box-shadow: 0 0 0 3px rgba(242,183,5,0.45), 0 6px 26px rgba(242,183,5,0.55); }
+        }
+
+        /* The options not chosen, while the verdict is still pending */
+        .qc-pill--dimmed {
+          opacity: 0.5 !important;
+        }
+
+        .qc-locked-note {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: var(--space-sm);
+          margin-top: var(--space-md);
+          padding: 10px 16px;
+          border-radius: var(--radius-md);
+          border: 1px dashed rgba(242,183,5,0.35);
+          background: rgba(242,183,5,0.06);
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--pale-gold);
+        }
+
+        .qc-locked-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--spotlight-gold);
+          animation: dotPulse 1.2s ease-in-out infinite;
         }
 
         /* Feedback states */

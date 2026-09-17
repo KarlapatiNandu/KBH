@@ -40,6 +40,10 @@ export default function Round1Engine({ participant }) {
   const [selectedOption, setSelectedOption] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
+  // The verdict is held back until the countdown ends: picking an option
+  // only lights it up gold, the way the show does it. `revealed` flips at
+  // time-up and is what lets QuestionCard show right/wrong.
+  const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState(null);
 
   // R6 - client-side timing. `questionAnchor` is the local wall-clock moment
@@ -171,6 +175,7 @@ export default function Round1Engine({ participant }) {
     setSelectedOption(null);
     setLastResult(null);
     setHasAnswered(false);
+    setRevealed(false);
     setGamePhase('active');
 
     // A response may already exist - page reload, or a re-serve that did not
@@ -264,6 +269,9 @@ export default function Round1Engine({ participant }) {
     if (!hasAnswered) {
       setHasAnswered(true);
     }
+
+    // The countdown is over — now the answer can be shown.
+    setRevealed(true);
 
     // Show transition briefly then call advance
     // Manual mode: the host is choosing what goes live, so clients must not
@@ -407,6 +415,7 @@ export default function Round1Engine({ participant }) {
                 onAnswer={handleAnswer}
                 disabled={hasAnswered || gamePhase !== 'active'}
                 lastResult={lastResult}
+                revealed={revealed}
                 selectedOption={selectedOption}
               />
             ) : (
@@ -581,20 +590,20 @@ function Round1Styles() {
         font-weight: 700;
       }
 
+      /* Timer coin sits centred above the question card (question_styling3) */
       .r1-layout {
         display: flex;
-        gap: var(--space-xl);
-        align-items: flex-start;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-md);
       }
 
       .r1-timer-col {
         flex-shrink: 0;
-        position: sticky;
-        top: var(--space-lg);
       }
 
       .r1-question-col {
-        flex: 1;
+        width: 100%;
         min-width: 0;
       }
 
@@ -639,19 +648,6 @@ function Round1Styles() {
 
       /* Responsive */
       @media (max-width: 640px) {
-        .r1-layout {
-          flex-direction: column;
-          align-items: center;
-        }
-
-        .r1-timer-col {
-          position: static;
-        }
-
-        .r1-question-col {
-          width: 100%;
-        }
-
         .r1-header-title {
           font-size: 16px;
         }

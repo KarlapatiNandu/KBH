@@ -16,6 +16,8 @@
  *   totalQuestions   — total question count
  *   timeUp          — true once the countdown has ended with no answer locked in
  *   lastResult      — {is_correct, points_awarded, response_time_ms} or null
+ *   revealed        — true once the verdict may be shown; until then a
+ *                     locked-in option only lights up gold
  *   selectedOption  — the index the host locked in (or null)
  */
 
@@ -27,8 +29,12 @@ export default function QuestionCard({
   totalQuestions,
   timeUp,
   lastResult,
+  revealed = false,
   selectedOption,
 }) {
+  // The lock-in shows immediately; the verdict waits for the reveal.
+  const showVerdict = revealed && lastResult !== null;
+
   // Derive hex styling based on state
   const getHexClass = (index) => {
     const classes = ['r2-hex', 'r2-hex--option'];
@@ -37,7 +43,7 @@ export default function QuestionCard({
       return classes.join(' ');
     }
 
-    if (lastResult) {
+    if (showVerdict) {
       if (index === question.correct_option) {
         classes.push('r2-hex--correct');
       } else if (index === selectedOption && !lastResult.is_correct) {
@@ -47,6 +53,8 @@ export default function QuestionCard({
       }
     } else if (index === selectedOption) {
       classes.push('r2-hex--selected');
+    } else {
+      classes.push('r2-hex--dimmed');
     }
 
     return classes.join(' ');
@@ -63,11 +71,48 @@ export default function QuestionCard({
         <span className="r2-qc-points">{question.base_points} pts</span>
       </div>
 
-      {/* Prize for this question (R8) — the "what you're playing for" line */}
+      {/* Prize for this question (R8) — the gold money bar with its rupee
+          coin, as it sits above the question on the show
+          (assets and references/question_styling2.png) */}
       {question.prize && (
-        <div className="r2-qc-prize">
-          <span className="r2-qc-prize-label">Playing for</span>
-          <span className="r2-qc-prize-value">{question.prize}</span>
+        <div className="r2-prize-row">
+          <div className="r2-prize">
+            <div className="r2-hex r2-hex--prize">
+              <span className="r2-hex-inner">
+                <span className="r2-prize-value">{question.prize}</span>
+              </span>
+            </div>
+            <span className="r2-prize-coin" aria-hidden="true">
+              <svg viewBox="0 0 56 56">
+                <defs>
+                  <linearGradient id="r2CoinRim" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#F7E7A0" />
+                    <stop offset="50%" stopColor="#F2B705" />
+                    <stop offset="100%" stopColor="#A9822F" />
+                  </linearGradient>
+                  <radialGradient id="r2CoinFace" cx="50%" cy="20%" r="85%">
+                    <stop offset="0%" stopColor="#1d2f7d" />
+                    <stop offset="65%" stopColor="#12205e" />
+                    <stop offset="100%" stopColor="#070f33" />
+                  </radialGradient>
+                </defs>
+                <circle cx="28" cy="28" r="26" fill="url(#r2CoinFace)" stroke="url(#r2CoinRim)" strokeWidth="3" />
+                <circle cx="28" cy="28" r="20" fill="none" stroke="url(#r2CoinRim)" strokeWidth="1.5" opacity="0.7" />
+                <text
+                  x="28"
+                  y="29"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily="'Poppins', sans-serif"
+                  fontSize="24"
+                  fontWeight="700"
+                  fill="url(#r2CoinRim)"
+                >
+                  ₹
+                </text>
+              </svg>
+            </span>
+          </div>
         </div>
       )}
 
@@ -95,10 +140,10 @@ export default function QuestionCard({
                         <span className="r2-qc-option-text">{option}</span>
                       </span>
                       {/* Feedback icon */}
-                      {lastResult && index === question.correct_option && (
+                      {showVerdict && index === question.correct_option && (
                         <span className="r2-qc-feedback-icon">✓</span>
                       )}
-                      {lastResult && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
+                      {showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
                         <span className="r2-qc-feedback-icon">✗</span>
                       )}
                     </span>
@@ -111,9 +156,16 @@ export default function QuestionCard({
       </div>
 
       {/* Host-controlled: what the contestant should do now */}
-      {!lastResult && (
-        <div className={`r2-qc-hint ${timeUp ? 'r2-qc-hint--timeup' : ''}`}>
-          {timeUp ? (
+      {!showVerdict && (
+        <div className={`r2-qc-hint ${timeUp ? 'r2-qc-hint--timeup' : ''} ${selectedOption !== null ? 'r2-qc-hint--locked' : ''}`}>
+          {selectedOption !== null ? (
+            <>
+              <span className="r2-qc-hint-icon">🔒</span>
+              <span>
+                <strong>{OPTION_LABELS[selectedOption]}</strong> is locked in — hold tight for the answer
+              </span>
+            </>
+          ) : timeUp ? (
             <>
               <span className="r2-qc-hint-icon">⏱</span>
               <span>Time&rsquo;s up — waiting for the host</span>
@@ -128,7 +180,7 @@ export default function QuestionCard({
       )}
 
       {/* Result feedback */}
-      {lastResult && (
+      {showVerdict && (
         <div className={`r2-qc-result ${lastResult.is_correct ? 'r2-qc-result--correct' : 'r2-qc-result--wrong'}`}>
           <span className="r2-qc-result-icon">
             {lastResult.is_correct ? '🔥' : '❌'}
@@ -200,30 +252,58 @@ export default function QuestionCard({
         }
 
         /* ── Prize ────────────────────────────────────────────── */
-        .r2-qc-prize {
+        /* Gold money bar with the rupee coin riding its right tip, sitting
+           above the question exactly as it does on the show. */
+        .r2-prize-row {
           display: flex;
-          align-items: baseline;
-          justify-content: center;
-          gap: 10px;
-          margin: calc(-1 * var(--space-sm)) 0 var(--space-lg);
+          justify-content: flex-end;
+          padding: 0 var(--space-md);
+          margin: calc(-1 * var(--space-sm)) 0 var(--space-md);
         }
 
-        .r2-qc-prize-label {
-          font-family: 'Inter', sans-serif;
-          font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: var(--pale-gold);
+        .r2-prize {
+          position: relative;
+          display: flex;
+          align-items: center;
+          padding-right: 28px;
         }
 
-        .r2-qc-prize-value {
+        .r2-hex--prize {
+          width: auto;
+        }
+
+        .r2-hex--prize .r2-hex-inner {
+          padding: 8px calc(var(--r2-hex-cut) + 18px);
+          min-height: 48px;
+          min-width: 180px;
+        }
+
+        .r2-prize-value {
           font-family: 'Poppins', sans-serif;
-          font-size: 30px;
+          font-size: 26px;
           font-weight: 700;
           line-height: 1;
-          color: var(--spotlight-gold);
-          text-shadow: 0 0 18px rgba(242,183,5,0.45), 0 1px 2px rgba(0,0,0,0.6);
+          letter-spacing: 0.01em;
+          white-space: nowrap;
+          color: var(--cloud-white);
+          text-shadow: 0 1px 2px rgba(0,0,0,0.6), 0 0 18px rgba(242,183,5,0.35);
+        }
+
+        .r2-prize-coin {
+          position: absolute;
+          right: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 56px;
+          height: 56px;
+          z-index: 2;
+          filter: drop-shadow(0 4px 10px rgba(0,0,0,0.5));
+        }
+
+        .r2-prize-coin svg {
+          display: block;
+          width: 100%;
+          height: 100%;
         }
 
         /* ── Rail: the gold line each row of hexes sits on ────── */
@@ -377,10 +457,33 @@ export default function QuestionCard({
           overflow-wrap: anywhere;
         }
 
-        /* Locked in by the host, verdict pending — classic amber */
+        /* Locked in by the host, verdict pending — the gold highlight, lit
+           the moment the lock-in lands and held until the reveal. */
+        .r2-hex--selected {
+          animation: r2LockedGlow 1.6s ease-in-out infinite;
+        }
+
         .r2-hex--selected .r2-hex-inner {
-          background: linear-gradient(180deg, var(--champagne-gold) 0%, var(--spotlight-gold) 100%);
+          background: linear-gradient(180deg, var(--champagne-gold) 0%, var(--spotlight-gold) 55%, var(--amber-glow) 100%);
           color: var(--deep-midnight);
+        }
+
+        @keyframes r2LockedGlow {
+          0%, 100% { filter: drop-shadow(0 4px 12px rgba(0,0,0,0.35)) drop-shadow(0 0 6px rgba(242,183,5,0.45)); }
+          50%      { filter: drop-shadow(0 4px 12px rgba(0,0,0,0.35)) drop-shadow(0 0 18px rgba(242,183,5,0.85)); }
+        }
+
+        /* The options not locked in, while the verdict is still pending */
+        .r2-hex--dimmed .r2-hex-inner {
+          background: linear-gradient(180deg, #0e1745 0%, #0a1238 100%);
+        }
+
+        .r2-hex--dimmed .r2-pill-num {
+          color: rgba(242,183,5,0.5);
+        }
+
+        .r2-hex--dimmed .r2-qc-option-text {
+          color: rgba(245,241,230,0.55);
         }
 
         .r2-hex--selected .r2-pill-num {
@@ -512,6 +615,17 @@ export default function QuestionCard({
           color: var(--warning-amber);
         }
 
+        .r2-qc-hint--locked {
+          border-style: solid;
+          border-color: var(--spotlight-gold);
+          background: rgba(242,183,5,0.12);
+          color: var(--champagne-gold);
+        }
+
+        .r2-qc-hint--locked strong {
+          color: var(--spotlight-gold);
+        }
+
         .r2-qc-hint-icon {
           font-size: 18px;
           flex-shrink: 0;
@@ -546,8 +660,26 @@ export default function QuestionCard({
             font-size: 18px;
           }
 
-          .r2-qc-prize-value {
-            font-size: 24px;
+          .r2-prize-row {
+            justify-content: center;
+          }
+
+          .r2-prize-value {
+            font-size: 21px;
+          }
+
+          .r2-hex--prize .r2-hex-inner {
+            min-width: 140px;
+            min-height: 42px;
+          }
+
+          .r2-prize-coin {
+            width: 46px;
+            height: 46px;
+          }
+
+          .r2-prize {
+            padding-right: 23px;
           }
 
           .r2-qc-option-text {
