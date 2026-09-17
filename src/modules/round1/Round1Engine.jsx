@@ -336,7 +336,9 @@ export default function Round1Engine({ participant }) {
             </svg>
           </div>
           <h2 className="r1-waiting-title">Fastest Finger First</h2>
-          <p className="r1-status-text">Waiting for the host to start the round…</p>
+          <p className="r1-status-text">
+            Waiting for <span className="r1-kishore-gold">Kishore</span> to start the round…
+          </p>
           <div className="r1-pulse-dots">
             <span /><span /><span />
           </div>
@@ -426,7 +428,9 @@ export default function Round1Engine({ participant }) {
         {/* Manual mode: the host decides when the next question goes live (R5) */}
         {gamePhase === 'held' && (
           <div className="r1-transition r1-transition--held">
-            <p>Time&rsquo;s up — waiting for the host&rsquo;s next question…</p>
+            <p>
+              Time&rsquo;s up — waiting for <span className="r1-kishore-gold">Kishore</span>&rsquo;s next question…
+            </p>
             <span className="r1-spinner" />
           </div>
         )}
@@ -474,6 +478,37 @@ function Round1Styles() {
         font-family: 'Inter', sans-serif;
         font-size: 16px;
         color: var(--pale-gold);
+      }
+
+      .r1-kishore-gold {
+        background: linear-gradient(
+          90deg,
+          #F2B705 0%,
+          #FFEBA3 20%,
+          #FFFFFF 40%,
+          #E8A600 60%,
+          #F7D050 80%,
+          #F2B705 100%
+        );
+        background-size: 200% 100%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        color: transparent;
+        display: inline-block;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        filter: drop-shadow(0 0 8px rgba(242, 183, 5, 0.45));
+        animation: kishoreGoldShimmer 2.5s linear infinite;
+      }
+
+      @keyframes kishoreGoldShimmer {
+        0% {
+          background-position: 0% center;
+        }
+        100% {
+          background-position: 200% center;
+        }
       }
 
       /* Waiting */
