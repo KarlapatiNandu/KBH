@@ -29,6 +29,9 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(null);
   const [revealing, setRevealing] = useState(false);
+  // Set when the database cannot carry a reveal yet (migration_v6 unrun) or
+  // the last read of the answer row failed — see the warning line below.
+  const [revealBlocked, setRevealBlocked] = useState(null);
 
   const isLive = roundState?.status === 'active';
   const liveQuestion = isLive
@@ -41,25 +44,47 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
       setResponse(null);
       return;
     }
+    // `select('*')`, not a column list: naming `revealed_at` makes the whole
+    // read fail on a database that has not run migration_v6, and a failed
+    // read used to read back as "nothing locked in" — which is what made the
+    // Reveal button appear and then vanish a moment later.
     const { data, error } = await supabase
       .from('responses')
-      .select('selected_option, is_correct, points_awarded, response_time_ms, revealed_at')
+      .select('*')
       .eq('participant_id', hotSeat.id)
       .eq('question_id', liveQuestion.id)
       .maybeSingle();
-    // A missing `revealed_at` column (migration_v6 not run) fails the whole
-    // select and would quietly read as "nothing locked in" — worth a line in
-    // the console rather than a silently dead panel.
-    if (error) console.error('Hot seat response read failed:', error.message);
+
+    if (error) {
+      // A read that failed is not an answer being withdrawn. Hold whatever
+      // the panel already shows — the host's lock-in and their Reveal button
+      // outlive a dropped request.
+      console.error('Hot seat response read failed:', error.message);
+      setRevealBlocked(`Could not re-read the answer (${error.message}). Showing the last known state.`);
+      return;
+    }
+
+    // A row that exists but has no `revealed_at` key means the column isn't
+    // there: the reveal can be clicked but has nowhere to land, and the
+    // contestant's screen would sit on the gold lock-in for good.
+    setRevealBlocked(
+      data && !('revealed_at' in data)
+        ? 'Reveal needs the database migration — run supabase/migration_v6.sql, then re-run supabase/rpcs.sql.'
+        : null
+    );
     setResponse(data || null);
   }, [liveQuestion, hotSeat]);
 
   // Refetch on every question change (incl. re-serve, via question_started_at)
   // and on any responses write, so a clear-on-serve reopens the buttons.
   useEffect(() => {
-    fetchResponse();
+    // The panel now holds its state through a failed read, so a new serve has
+    // to blank it deliberately rather than relying on the fetch to do it.
+    setResponse(null);
     setConfirming(null);
     setRevealing(false);
+    setRevealBlocked(null);
+    fetchResponse();
 
     const channel = supabase
       .channel('hotseat-answer-panel')
@@ -112,10 +137,20 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
     setRevealing(false);
 
     if (error || !data?.success) {
-      onResult(error?.message || data?.error || 'Failed to reveal answer', 'error');
+      const message = error?.message || data?.error || 'Failed to reveal answer';
+      onResult(message, 'error');
+      // Toasts clear themselves after three seconds; a reveal that cannot
+      // work at all needs to stay on screen, next to the button that failed.
+      setRevealBlocked(
+        /host_reveal_answer|schema cache|does not exist/i.test(message)
+          ? 'Reveal is not installed on the database — run supabase/migration_v6.sql, then re-run supabase/rpcs.sql.'
+          : `Reveal failed: ${message}`
+      );
       fetchResponse();
       return;
     }
+
+    setRevealBlocked(null);
 
     setResponse((prev) => (prev ? { ...prev, revealed_at: data.revealed_at } : prev));
     onResult(
@@ -212,7 +247,9 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
               </span>
             </span>
 
-            {/* R9 — the host, not the countdown, decides when this lands */}
+            {/* R9 — the host, not the countdown, decides when this lands, so
+                this button stays put until it is clicked: nothing in here is
+                on a timer, and a failed read cannot take it away. */}
             {revealed ? (
               <span className="hsa-revealed">
                 <span className="hsa-revealed-mark">✓</span> Revealed
@@ -236,6 +273,8 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
         ) : (
           <span className="hsa-pending">Waiting for the contestant to say their answer…</span>
         )}
+
+        {revealBlocked && <p className="hsa-warning">{revealBlocked}</p>}
       </div>
 
       <style>{`
@@ -487,6 +526,17 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
         }
 
         .hsa-revealed-mark { color: var(--success-green); }
+
+        .hsa-warning {
+          margin: var(--space-sm) 0 0;
+          padding: 8px 10px;
+          border-radius: var(--radius-sm);
+          border: 1px solid rgba(229,72,77,0.4);
+          background: rgba(229,72,77,0.08);
+          color: var(--danger-red);
+          font-size: 12px;
+          line-height: 1.4;
+        }
 
         .hsa-verdict--correct { color: var(--success-green); }
         .hsa-verdict--wrong   { color: var(--danger-red); }

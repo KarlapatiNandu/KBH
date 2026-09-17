@@ -26,6 +26,12 @@ const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
 const DEFAULT_DURATION_MS = 10000; // Fallback if round_state.question_duration_ms is unset
 const LOCK_POLL_MS = 1200;        // How often to look for the host's lock-in / reveal
 
+// Returned by checkExistingResponse when the request itself fell over, so a
+// dropped read is never mistaken for "the host cleared the answer". (R9: a
+// lock-in now waits on the host's reveal, so this row is polled in that state
+// for as long as they choose to hold it.)
+const READ_FAILED = Symbol('read-failed');
+
 export default function Round2Engine({ participant }) {
   const navigate = useNavigate();
 
@@ -85,13 +91,14 @@ export default function Round2Engine({ participant }) {
   const checkExistingResponse = useCallback(async (questionId) => {
     if (!questionId || !participant.participant_id) return null;
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('responses')
       .select('*')
       .eq('participant_id', participant.participant_id)
       .eq('question_id', questionId)
       .maybeSingle();
 
+    if (error) return READ_FAILED;
     return data;
   }, [participant.participant_id]);
 
@@ -146,6 +153,7 @@ export default function Round2Engine({ participant }) {
 
     const existing = await checkExistingResponse(currentQ.id);
     if (anchorKeyRef.current !== servedKey) return;
+    if (existing === READ_FAILED) return; // try again on the next poll
 
     // revealed_at is part of the signature: the host revealing an answer is
     // an UPDATE to a row we are already showing, and it must not be
@@ -265,7 +273,7 @@ export default function Round2Engine({ participant }) {
     // A response may already exist - page reload, or a re-serve that did not
     // clear responses. Reflect it so the verdict survives a refresh.
     checkExistingResponse(currentQ.id).then((existing) => {
-      if (!existing) return;
+      if (!existing || existing === READ_FAILED) return;
       answeredQuestionsRef.current.add(currentQ.id);
       responseSigRef.current = `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}:${existing.revealed_at}`;
       setSelectedOption(existing.selected_option);
