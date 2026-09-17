@@ -9,7 +9,4 @@ export {
   getStoredParticipant,
   storeParticipant,
   clearStoredParticipant,
-  hasCompletedNetworkCheck,
-  markNetworkCheckComplete,
-  clearNetworkCheck,
 } from './storage';

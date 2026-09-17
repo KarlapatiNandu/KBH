@@ -16,7 +16,6 @@ import {
   ParticipantHome,
   NetworkCheck,
   getStoredParticipant,
-  hasCompletedNetworkCheck,
 } from './modules/participant';
 
 // Round 1 Engine (Module 4)
@@ -33,11 +32,9 @@ export default function App() {
   // Participant state (Module 3)
   const [participant, setParticipant] = useState(() => getStoredParticipant());
 
-  // Network check is per browser session, not per login (R2)
-  const [networkChecked, setNetworkChecked] = useState(() => {
-    const stored = getStoredParticipant();
-    return stored ? hasCompletedNetworkCheck(stored.participant_id) : false;
-  });
+  // Network check runs on every app load (R2) — never persisted, so a
+  // refresh or a fresh tab re-probes the connection before any round.
+  const [networkChecked, setNetworkChecked] = useState(false);
 
   const handleAdminLogin = useCallback((a) => {
     setAdmin(a);

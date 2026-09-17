@@ -2,12 +2,11 @@
  * Module 3 — participant session storage.
  *
  * Participants don't use Supabase Auth; their identity is a row id kept in
- * localStorage. The network-check verdict is kept in sessionStorage so the
- * check runs once per browser session rather than on every navigation.
+ * localStorage. The network check is deliberately *not* persisted — it runs on
+ * every app load, so a connection that degrades mid-event still gets caught.
  */
 
 const STORAGE_KEY = 'kbh_participant';
-const NETWORK_CHECK_KEY = 'kbh_network_checked';
 
 export function getStoredParticipant() {
   try {
@@ -31,32 +30,6 @@ export function storeParticipant(participant) {
 export function clearStoredParticipant() {
   try {
     localStorage.removeItem(STORAGE_KEY);
-    sessionStorage.removeItem(NETWORK_CHECK_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-/** Has this browser session already completed the post-login network check? */
-export function hasCompletedNetworkCheck(participantId) {
-  try {
-    return sessionStorage.getItem(NETWORK_CHECK_KEY) === participantId;
-  } catch {
-    return false;
-  }
-}
-
-export function markNetworkCheckComplete(participantId) {
-  try {
-    sessionStorage.setItem(NETWORK_CHECK_KEY, participantId);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function clearNetworkCheck() {
-  try {
-    sessionStorage.removeItem(NETWORK_CHECK_KEY);
   } catch {
     /* ignore */
   }

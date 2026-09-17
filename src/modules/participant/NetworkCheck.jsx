@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { markNetworkCheckComplete } from './storage';
 
 /**
  * R2 — Automatic network check
@@ -19,9 +18,13 @@ import { markNetworkCheckComplete } from './storage';
  * `record_network_check` RPC. Failures render the participant's name in red
  * in the admin Participants list.
  *
+ * The check runs on every visit to this screen — no per-session skip — so a
+ * connection that degrades mid-event is caught the next time through.
+ *
  * A failure is not a hard block: a false negative on flaky campus WiFi
- * shouldn't strand a student mid-event. They get Retry (primary) and
- * Continue anyway (secondary); the row stays red either way.
+ * shouldn't strand a student mid-event. Their only way forward is an explicit,
+ * danger-styled bypass — no Retry, because a retry until it passes just hides
+ * the verdict the host needs. The row stays red either way.
  *
  * Props:
  *   participant — { participant_id, roll_no, name }
@@ -77,7 +80,6 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
   const [latency, setLatency] = useState(null);
   const [samples, setSamples] = useState([]); // per-probe round trips, null = dropped
   const [result, setResult] = useState(null); // { passed, detail }
-  const [runId, setRunId] = useState(0);
   const cancelledRef = useRef(false);
 
   const runCheck = useCallback(async () => {
@@ -186,7 +188,6 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
     setResult({ passed, detail });
 
     if (passed) {
-      markNetworkCheckComplete(participant.participant_id);
       setTimeout(() => {
         if (!cancelledRef.current) onPass();
       }, 900);
@@ -198,10 +199,9 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
     return () => {
       cancelledRef.current = true;
     };
-  }, [runCheck, runId]);
+  }, [runCheck]);
 
-  const handleContinueAnyway = () => {
-    markNetworkCheckComplete(participant.participant_id);
+  const handleBypass = () => {
     onContinue();
   };
 
@@ -220,7 +220,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
           {result
             ? (result.passed
                 ? 'Taking you to Round 1…'
-                : 'Your device may struggle during the live round.')
+                : 'This connection will struggle during a live round.')
             : `Hang tight, ${participant.name || participant.roll_no} — interrogating your WiFi.`}
         </p>
 
@@ -272,21 +272,19 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
         </ul>
 
         {failed && (
-          <div className="nc-actions">
-            <button className="btn btn-primary" onClick={() => setRunId((n) => n + 1)}>
-              Retry check
+          <div className="nc-bypass">
+            <p className="nc-bypass-warn">
+              Bypassing does not guarantee your spot. A dropped socket mid-round counts
+              as a missed answer — no replays, no do-overs.
+            </p>
+            <button className="btn btn-danger nc-bypass-btn" onClick={handleBypass}>
+              Bypass at your own risk
             </button>
-            <button className="btn btn-secondary" onClick={handleContinueAnyway}>
-              Bypass anyway
-            </button>
+            <p className="nc-note">
+              Your host can see this result, so &ldquo;my WiFi died&rdquo; won&rsquo;t be
+              breaking news later.
+            </p>
           </div>
-        )}
-
-        {failed && (
-          <p className="nc-note">
-            <span className="nc-note-snark">Bypass at your own risk.</span> Your host can see
-            this result, so &ldquo;my WiFi died&rdquo; won&rsquo;t be breaking news later.
-          </p>
         )}
       </div>
 
@@ -517,18 +515,29 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
           color: var(--pale-gold);
         }
 
-        .nc-actions {
-          display: flex;
-          gap: var(--space-sm);
+        .nc-bypass {
           margin-top: var(--space-lg);
+          padding: 16px;
+          background: var(--danger-red-soft);
+          border: 1px solid rgba(229, 72, 77, 0.35);
+          border-radius: var(--radius-lg);
         }
 
-        .nc-actions .btn { flex: 1; }
+        .nc-bypass-warn {
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          line-height: 1.55;
+          color: var(--cloud-white);
+          margin-bottom: var(--space-md);
+        }
 
-        .nc-note-snark {
-          color: var(--warning-amber);
+        .nc-bypass-btn {
+          width: 100%;
           font-weight: 600;
+          letter-spacing: 0.01em;
         }
+
+        .nc-note { margin-top: var(--space-sm); }
 
         .nc-note {
           margin-top: var(--space-md);
