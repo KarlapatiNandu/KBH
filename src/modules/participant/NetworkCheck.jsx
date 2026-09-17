@@ -35,6 +35,23 @@ const REALTIME_TIMEOUT_MS = 8000;
 const MAX_MEDIAN_LATENCY_MS = 2000;
 const MIN_SUCCESSFUL_PINGS = 2;
 
+// Latency bands for the live readout. Purely cosmetic — the pass/fail line is
+// still MAX_MEDIAN_LATENCY_MS; these just tell the participant how it *feels*.
+const LATENCY_BANDS = [
+  { max: 150,  label: 'Excellent', bars: 4, tone: 'good' },
+  { max: 400,  label: 'Good',      bars: 3, tone: 'good' },
+  { max: 900,  label: 'Sluggish',  bars: 2, tone: 'warn' },
+  { max: MAX_MEDIAN_LATENCY_MS, label: 'Laggy', bars: 1, tone: 'warn' },
+];
+
+function latencyBand(ms) {
+  if (ms === null || ms === undefined) return { label: 'Measuring', bars: 0, tone: 'idle' };
+  return (
+    LATENCY_BANDS.find((b) => ms <= b.max) ||
+    { label: 'Unplayable', bars: 0, tone: 'bad' }
+  );
+}
+
 function median(values) {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -58,6 +75,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
     verdict: 'pending',
   });
   const [latency, setLatency] = useState(null);
+  const [samples, setSamples] = useState([]); // per-probe round trips, null = dropped
   const [result, setResult] = useState(null); // { passed, detail }
   const [runId, setRunId] = useState(0);
   const cancelledRef = useRef(false);
@@ -66,6 +84,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
     cancelledRef.current = false;
     setSteps({ ping: 'running', realtime: 'pending', verdict: 'pending' });
     setLatency(null);
+    setSamples([]);
     setResult(null);
 
     const failures = [];
@@ -81,9 +100,14 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
           'Ping'
         );
         if (error) throw new Error(error.message);
-        latencies.push(Math.round(performance.now() - startedAt));
+        const ms = Math.round(performance.now() - startedAt);
+        latencies.push(ms);
+        setSamples((prev) => [...prev, ms]);
+        // Show the running median so the number moves while we probe.
+        setLatency(median(latencies));
       } catch {
         // A dropped probe is a data point, not a crash — keep going.
+        setSamples((prev) => [...prev, null]);
       }
     }
 
@@ -182,6 +206,7 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
   };
 
   const failed = result && !result.passed;
+  const band = latencyBand(latency);
 
   return (
     <div className="nc-screen">
@@ -198,6 +223,35 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
                 : 'Your device may struggle during the live round.')
             : `Hang tight, ${participant.name || participant.roll_no} — interrogating your WiFi.`}
         </p>
+
+        <div className={`nc-gauge nc-gauge--${band.tone}`}>
+          <div className="nc-gauge-main">
+            <span className="nc-gauge-value">
+              {latency === null ? '—' : latency}
+              <span className="nc-gauge-unit">ms</span>
+            </span>
+            <span className="nc-gauge-meta">
+              <span className="nc-gauge-label">{band.label}</span>
+              <span className="nc-gauge-caption">median round trip</span>
+            </span>
+          </div>
+          <div className="nc-bars" aria-hidden="true">
+            {[1, 2, 3, 4].map((n) => (
+              <span key={n} className={`nc-bar ${n <= band.bars ? 'nc-bar--on' : ''}`} />
+            ))}
+          </div>
+          <ul className="nc-samples">
+            {Array.from({ length: PING_COUNT }, (_, i) => {
+              const sample = samples[i];
+              const state = i >= samples.length ? 'wait' : sample === null ? 'drop' : 'ok';
+              return (
+                <li key={i} className={`nc-sample nc-sample--${state}`}>
+                  {state === 'wait' ? '···' : state === 'drop' ? 'lost' : `${sample} ms`}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
         <ul className="nc-steps">
           <CheckStep
@@ -223,14 +277,15 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
               Retry check
             </button>
             <button className="btn btn-secondary" onClick={handleContinueAnyway}>
-              Continue anyway
+              Bypass anyway
             </button>
           </div>
         )}
 
         {failed && (
           <p className="nc-note">
-            Your host can see this result and will know your connection is unstable.
+            <span className="nc-note-snark">Bypass at your own risk.</span> Your host can see
+            this result, so &ldquo;my WiFi died&rdquo; won&rsquo;t be breaking news later.
           </p>
         )}
       </div>
@@ -268,6 +323,123 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
           font-size: 14px;
           color: var(--pale-gold);
           margin-bottom: var(--space-lg);
+        }
+
+        .nc-gauge {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          align-items: center;
+          gap: var(--space-md);
+          padding: 16px 18px;
+          margin-bottom: var(--space-md);
+          background: linear-gradient(135deg, rgba(52,24,104,0.55), rgba(11,20,64,0.55));
+          border: 1px solid rgba(242,183,5,0.18);
+          border-radius: var(--radius-lg);
+        }
+
+        .nc-gauge--warn { border-color: rgba(232,135,30,0.35); }
+        .nc-gauge--bad  { border-color: rgba(229,72,77,0.4); }
+
+        .nc-gauge-main {
+          display: flex;
+          align-items: baseline;
+          gap: 12px;
+          min-width: 0;
+        }
+
+        .nc-gauge-value {
+          font-family: 'Poppins', sans-serif;
+          font-size: 34px;
+          font-weight: 700;
+          line-height: 1;
+          color: var(--spotlight-gold);
+          font-variant-numeric: tabular-nums;
+        }
+
+        .nc-gauge--good .nc-gauge-value { color: var(--success-green); }
+        .nc-gauge--warn .nc-gauge-value { color: var(--warning-amber); }
+        .nc-gauge--bad  .nc-gauge-value { color: var(--danger-red); }
+
+        .nc-gauge-unit {
+          font-size: 14px;
+          font-weight: 600;
+          margin-left: 4px;
+          color: var(--pale-gold);
+        }
+
+        .nc-gauge-meta {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+
+        .nc-gauge-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--cloud-white);
+        }
+
+        .nc-gauge-caption {
+          font-family: 'Inter', sans-serif;
+          font-size: 11px;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: rgba(240, 244, 248, 0.45);
+        }
+
+        .nc-bars {
+          display: flex;
+          align-items: flex-end;
+          gap: 4px;
+          height: 28px;
+        }
+
+        .nc-bar {
+          width: 6px;
+          border-radius: 2px;
+          background: rgba(240, 244, 248, 0.14);
+          transition: background 0.3s ease;
+        }
+
+        .nc-bar:nth-child(1) { height: 30%; }
+        .nc-bar:nth-child(2) { height: 52%; }
+        .nc-bar:nth-child(3) { height: 76%; }
+        .nc-bar:nth-child(4) { height: 100%; }
+
+        .nc-gauge--good .nc-bar--on { background: var(--success-green); }
+        .nc-gauge--warn .nc-bar--on { background: var(--warning-amber); }
+        .nc-gauge--bad  .nc-bar--on { background: var(--danger-red); }
+        .nc-gauge--idle .nc-bar--on { background: var(--spotlight-gold); }
+
+        .nc-samples {
+          grid-column: 1 / -1;
+          list-style: none;
+          display: flex;
+          gap: 6px;
+          margin: 0;
+          padding: 0;
+        }
+
+        .nc-sample {
+          flex: 1;
+          text-align: center;
+          padding: 4px 0;
+          font-family: 'Inter', sans-serif;
+          font-size: 11px;
+          font-variant-numeric: tabular-nums;
+          color: var(--pale-gold);
+          background: rgba(11,20,64,0.5);
+          border: 1px solid rgba(242,183,5,0.12);
+          border-radius: var(--radius-sm);
+        }
+
+        .nc-sample--wait { color: rgba(240, 244, 248, 0.3); }
+
+        .nc-sample--drop {
+          color: var(--danger-red);
+          border-color: rgba(229,72,77,0.35);
+          background: var(--danger-red-soft);
         }
 
         .nc-steps {
@@ -352,6 +524,11 @@ export default function NetworkCheck({ participant, onPass, onContinue }) {
         }
 
         .nc-actions .btn { flex: 1; }
+
+        .nc-note-snark {
+          color: var(--warning-amber);
+          font-weight: 600;
+        }
 
         .nc-note {
           margin-top: var(--space-md);
