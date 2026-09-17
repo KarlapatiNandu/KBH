@@ -9,6 +9,12 @@ import { supabase } from '../../lib/supabase';
  * host_submit_answer, which resolves the live question and the active
  * participant server-side, then scores it exactly like a normal submission.
  *
+ * R9 — locking in is no longer the whole story. The lock-in freezes the
+ * contestant's countdown and lights their option gold; the verdict stays
+ * hidden until the host hits Reveal below (host_reveal_answer). The timer
+ * running out reveals nothing on its own, so the host can hold the moment
+ * for as long as the room needs it.
+ *
  * Props:
  *   roundState — the round 2 round_state row
  *   questions  — round 2 questions incl. options + correct_option
@@ -22,6 +28,7 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
   const [response, setResponse] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(null);
+  const [revealing, setRevealing] = useState(false);
 
   const isLive = roundState?.status === 'active';
   const liveQuestion = isLive
@@ -34,12 +41,16 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
       setResponse(null);
       return;
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('responses')
-      .select('selected_option, is_correct, points_awarded, response_time_ms')
+      .select('selected_option, is_correct, points_awarded, response_time_ms, revealed_at')
       .eq('participant_id', hotSeat.id)
       .eq('question_id', liveQuestion.id)
       .maybeSingle();
+    // A missing `revealed_at` column (migration_v6 not run) fails the whole
+    // select and would quietly read as "nothing locked in" — worth a line in
+    // the console rather than a silently dead panel.
+    if (error) console.error('Hot seat response read failed:', error.message);
     setResponse(data || null);
   }, [liveQuestion, hotSeat]);
 
@@ -48,6 +59,7 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
   useEffect(() => {
     fetchResponse();
     setConfirming(null);
+    setRevealing(false);
 
     const channel = supabase
       .channel('hotseat-answer-panel')
@@ -82,12 +94,35 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
       is_correct: data.is_correct,
       points_awarded: data.points_awarded,
       response_time_ms: data.response_time_ms,
+      revealed_at: null,
     });
+    // The verdict is for the host's eyes only until they reveal it. (R9)
     onResult(
       data.is_correct
-        ? `${OPTION_LABELS[index]} is correct — +${data.points_awarded} pts for ${hotSeat.roll_no}`
-        : `${OPTION_LABELS[index]} is wrong — correct answer was ${OPTION_LABELS[liveQuestion.correct_option]}`,
+        ? `${OPTION_LABELS[index]} is correct — +${data.points_awarded} pts for ${hotSeat.roll_no}. Their timer is paused; hit Reveal when you're ready.`
+        : `${OPTION_LABELS[index]} is wrong — the answer is ${OPTION_LABELS[liveQuestion.correct_option]}. Their timer is paused; hit Reveal when you're ready.`,
       data.is_correct ? 'success' : 'error'
+    );
+  };
+
+  // R9 — show the verdict on the contestant's screen, on the host's cue.
+  const reveal = async () => {
+    setRevealing(true);
+    const { data, error } = await supabase.rpc('host_reveal_answer');
+    setRevealing(false);
+
+    if (error || !data?.success) {
+      onResult(error?.message || data?.error || 'Failed to reveal answer', 'error');
+      fetchResponse();
+      return;
+    }
+
+    setResponse((prev) => (prev ? { ...prev, revealed_at: data.revealed_at } : prev));
+    onResult(
+      response?.is_correct
+        ? `Revealed — ${hotSeat.roll_no} takes +${response.points_awarded} pts`
+        : `Revealed — the answer was ${OPTION_LABELS[liveQuestion.correct_option]}`,
+      response?.is_correct ? 'success' : 'error'
     );
   };
 
@@ -110,6 +145,7 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
   }
 
   const locked = response !== null;
+  const revealed = locked && !!response.revealed_at;
 
   return (
     <div className="hsa">
@@ -164,14 +200,34 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
 
       <div className="hsa-foot">
         {locked ? (
-          <span className={`hsa-verdict ${response.is_correct ? 'hsa-verdict--correct' : 'hsa-verdict--wrong'}`}>
-            {response.is_correct
-              ? `Correct — +${response.points_awarded} pts (${(response.response_time_ms / 1000).toFixed(1)}s)`
-              : `Wrong — the answer was ${OPTION_LABELS[liveQuestion.correct_option]}`}
-            <span className="hsa-verdict-hint">
-              Re-serve with &ldquo;Clear answers on serve&rdquo; to replay this question.
+          <div className="hsa-locked">
+            <span className={`hsa-verdict ${response.is_correct ? 'hsa-verdict--correct' : 'hsa-verdict--wrong'}`}>
+              {response.is_correct
+                ? `Correct — +${response.points_awarded} pts (${(response.response_time_ms / 1000).toFixed(1)}s)`
+                : `Wrong — the answer was ${OPTION_LABELS[liveQuestion.correct_option]}`}
+              <span className="hsa-verdict-hint">
+                {revealed
+                  ? 'Shown on the contestant’s screen. Re-serve with “Clear answers on serve” to replay this question.'
+                  : 'Their timer is paused and only the gold lock-in shows — the verdict is still hidden.'}
+              </span>
             </span>
-          </span>
+
+            {/* R9 — the host, not the countdown, decides when this lands */}
+            {revealed ? (
+              <span className="hsa-revealed">
+                <span className="hsa-revealed-mark">✓</span> Revealed
+              </span>
+            ) : (
+              <button
+                className="hsa-reveal"
+                onClick={reveal}
+                disabled={revealing}
+                title="Show the answer on the contestant’s screen now"
+              >
+                {revealing ? 'Revealing…' : '👁 Reveal answer'}
+              </button>
+            )}
+          </div>
         ) : confirming !== null ? (
           <span className="hsa-pending">
             Locking in <strong>{OPTION_LABELS[confirming]}</strong> — click it again to confirm, or
@@ -367,12 +423,70 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
           cursor: pointer;
         }
 
+        .hsa-locked {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-sm);
+          flex-wrap: wrap;
+        }
+
         .hsa-verdict {
           display: flex;
           flex-direction: column;
           gap: 2px;
           font-weight: 600;
         }
+
+        .hsa-reveal {
+          flex-shrink: 0;
+          padding: 8px 16px;
+          border-radius: var(--radius-sm);
+          border: 1px solid var(--spotlight-gold);
+          background: var(--spotlight-gold);
+          color: var(--deep-midnight);
+          font-family: 'Poppins', sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          animation: hsaRevealPulse 1.6s ease-in-out infinite;
+          transition: all 0.15s ease;
+        }
+
+        .hsa-reveal:hover:not(:disabled) {
+          filter: brightness(1.1);
+        }
+
+        .hsa-reveal:disabled {
+          cursor: default;
+          opacity: 0.7;
+          animation: none;
+        }
+
+        @keyframes hsaRevealPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(242,183,5,0.45); }
+          50%      { box-shadow: 0 0 0 6px rgba(242,183,5,0); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .hsa-reveal { animation: none; }
+        }
+
+        .hsa-revealed {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 14px;
+          border-radius: var(--radius-sm);
+          border: 1px solid rgba(242,183,5,0.35);
+          color: var(--pale-gold);
+          font-family: 'Poppins', sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+        }
+
+        .hsa-revealed-mark { color: var(--success-green); }
 
         .hsa-verdict--correct { color: var(--success-green); }
         .hsa-verdict--wrong   { color: var(--danger-red); }

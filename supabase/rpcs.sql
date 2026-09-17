@@ -257,6 +257,65 @@ END;
 $$;
 
 
+-- ─── host_reveal_answer ─────────────────────────────────────
+-- The host decides when the locked-in answer is shown on the contestant's
+-- screen. (R9) Until this stamps responses.revealed_at, that screen holds
+-- the gold "locked in" highlight with its countdown frozen — the timer
+-- running out no longer reveals anything by itself.
+--
+-- Resolves the live Round 2 question and the active participant
+-- server-side, exactly like host_submit_answer, so the admin console only
+-- has to say "now". Idempotent: revealing twice keeps the first stamp, so
+-- a double-click cannot re-time the reveal.
+CREATE OR REPLACE FUNCTION host_reveal_answer()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_round_state RECORD;
+  v_question_id UUID;
+  v_revealed_at TIMESTAMPTZ;
+BEGIN
+  SELECT * INTO v_round_state FROM round_state WHERE round = 2;
+  IF NOT FOUND OR v_round_state.status != 'active' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Round 2 is not active');
+  END IF;
+
+  IF v_round_state.active_participant_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No hot seat participant nominated');
+  END IF;
+
+  SELECT id INTO v_question_id
+  FROM questions
+  WHERE round = 2 AND order_index = v_round_state.current_question_index
+  LIMIT 1;
+
+  IF v_question_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No live question');
+  END IF;
+
+  UPDATE responses
+  SET revealed_at = COALESCE(revealed_at, now())
+  WHERE participant_id = v_round_state.active_participant_id
+    AND question_id    = v_question_id
+  RETURNING revealed_at INTO v_revealed_at;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No answer locked in yet');
+  END IF;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'question_id', v_question_id,
+    'participant_id', v_round_state.active_participant_id,
+    'revealed_at', v_revealed_at
+  );
+END;
+$$;
+
+
 -- ─── advance_question ───────────────────────────────────────
 -- Called by a participant client when its local countdown hits zero.
 -- Atomic WHERE clause means only the first caller actually advances.

@@ -14,12 +14,17 @@ import Round2Results from './Round2Results';
  * R7 — the contestant does not answer on this device. The host locks the
  * answer in from the admin console (host_submit_answer); this engine watches
  * the `responses` table and mirrors that lock-in and its verdict here.
+ *
+ * R9 — and the host decides when the verdict lands. The lock-in freezes this
+ * screen's countdown and lights the chosen option gold; nothing else moves
+ * until `responses.revealed_at` is stamped (host_reveal_answer). The timer
+ * reaching zero no longer reveals anything — it only matters for a question
+ * nobody locked an answer into.
  */
 
 const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
 const DEFAULT_DURATION_MS = 10000; // Fallback if round_state.question_duration_ms is unset
-const LOCK_POLL_MS = 1200;        // How often to look for the host's lock-in
-const LOCK_REVEAL_DELAY_MS = 1500; // Beat of gold highlight before a late reveal
+const LOCK_POLL_MS = 1200;        // How often to look for the host's lock-in / reveal
 
 export default function Round2Engine({ participant }) {
   const navigate = useNavigate();
@@ -32,8 +37,7 @@ export default function Round2Engine({ participant }) {
   const [lastResult, setLastResult] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
   // The host's lock-in lights the option gold straight away; the verdict is
-  // held back until the countdown ends (or, if the host locked in after time
-  // was up, until a short beat of that gold highlight has played).
+  // held back until the host reveals it from the console. (R9)
   const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState(null);
 
@@ -44,9 +48,6 @@ export default function Round2Engine({ participant }) {
   const anchorMsRef = useRef(null);
   const anchorKeyRef = useRef(null);
   const advanceTimeoutRef = useRef(null);
-  const revealTimeoutRef = useRef(null);
-  const timeUpRef = useRef(false);
-  const verdictRef = useRef(null);
   // Signature of the response row as last seen, so repeated polls that find
   // nothing new cost nothing — no state writes, no re-render.
   const responseSigRef = useRef(undefined);
@@ -146,14 +147,16 @@ export default function Round2Engine({ participant }) {
     const existing = await checkExistingResponse(currentQ.id);
     if (anchorKeyRef.current !== servedKey) return;
 
+    // revealed_at is part of the signature: the host revealing an answer is
+    // an UPDATE to a row we are already showing, and it must not be
+    // swallowed as "nothing new". (R9)
     const sig = existing
-      ? `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}`
+      ? `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}:${existing.revealed_at}`
       : null;
     if (sig === responseSigRef.current) return;
     responseSigRef.current = sig;
 
     if (existing) {
-      const isNewLockIn = !answeredQuestionsRef.current.has(currentQ.id);
       answeredQuestionsRef.current.add(currentQ.id);
       setSelectedOption(existing.selected_option);
       const verdict = {
@@ -161,22 +164,14 @@ export default function Round2Engine({ participant }) {
         points_awarded: existing.points_awarded,
         response_time_ms: existing.response_time_ms,
       };
-      verdictRef.current = verdict;
       setLastResult(verdict);
       setHasAnswered(true);
-
-      // The countdown already finished before the host locked in, so there
-      // is no timer left to reveal against — show the gold highlight for a
-      // beat, then the verdict.
-      if (isNewLockIn && timeUpRef.current) {
-        clearTimeout(revealTimeoutRef.current);
-        revealTimeoutRef.current = setTimeout(() => setRevealed(true), LOCK_REVEAL_DELAY_MS);
-      }
+      // Nothing local decides this any more — the host's stamp does, and an
+      // un-reveal (host clears and re-locks) walks back with it.
+      setRevealed(!!existing.revealed_at);
     } else if (answeredQuestionsRef.current.has(currentQ.id)) {
       // Was locked in, now gone — the host cleared it. Reopen.
       answeredQuestionsRef.current.delete(currentQ.id);
-      clearTimeout(revealTimeoutRef.current);
-      verdictRef.current = null;
       setSelectedOption(null);
       setLastResult(null);
       setHasAnswered(false);
@@ -201,7 +196,7 @@ export default function Round2Engine({ participant }) {
     };
   }, [participant.participant_id, syncResponse]);
 
-  // Polling fallback until the lock-in lands: realtime delivery to a phone
+  // Polling fallback until the lock-in and its reveal land: realtime delivery to a phone
   // on venue wifi is not something to bet the hot seat on, and one client
   // polling a single indexed row costs nothing. Deliberately *not* gated on
   // gamePhase — the host usually locks the answer in after the countdown has
@@ -260,9 +255,6 @@ export default function Round2Engine({ participant }) {
     setQuestionAnchor(anchoredAt);
 
     answeredQuestionsRef.current.delete(currentQ.id);
-    clearTimeout(revealTimeoutRef.current);
-    timeUpRef.current = false;
-    verdictRef.current = null;
     responseSigRef.current = undefined;
     setSelectedOption(null);
     setLastResult(null);
@@ -275,38 +267,27 @@ export default function Round2Engine({ participant }) {
     checkExistingResponse(currentQ.id).then((existing) => {
       if (!existing) return;
       answeredQuestionsRef.current.add(currentQ.id);
-      responseSigRef.current = `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}`;
+      responseSigRef.current = `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}:${existing.revealed_at}`;
       setSelectedOption(existing.selected_option);
       const verdict = {
         is_correct: existing.is_correct,
         points_awarded: existing.points_awarded,
         response_time_ms: existing.response_time_ms,
       };
-      verdictRef.current = verdict;
       setLastResult(verdict);
       setHasAnswered(true);
+      // A reload mid-reveal must come back revealed, not replay the hold. (R9)
+      setRevealed(!!existing.revealed_at);
     });
   }, [roundState, questionsLoaded, questions, checkExistingResponse]);
 
-  const handleTimeUp = useCallback(async () => {
-    if (!roundState || roundState.status !== 'active') return;
+  // Once the question is settled — the timer ran out on an unanswered
+  // question, or the host revealed the verdict — hand the round on: hold for
+  // the host in manual mode, otherwise run the transition and advance. (R5)
+  const settleQuestion = useCallback(() => {
+    if (!roundStateRef.current || roundStateRef.current.status !== 'active') return;
 
-    timeUpRef.current = true;
-
-    if (!hasAnswered) {
-      setHasAnswered(true);
-    }
-
-    // The countdown is what reveals the answer — but only if the host has
-    // already locked one in. If they have not, syncResponse reveals it when
-    // the lock-in arrives.
-    if (verdictRef.current) {
-      setRevealed(true);
-    }
-
-    // Manual mode: the host is choosing what goes live, so clients must not
-    // advance past the question they are driving. (R5)
-    if (roundState.manual_mode) {
+    if (roundStateRef.current.manual_mode) {
       setGamePhase('held');
       return;
     }
@@ -315,6 +296,7 @@ export default function Round2Engine({ participant }) {
 
     // Held in a ref so navigating away mid-transition does not fire the RPC
     // from a dead component. (ISSUES 3.9)
+    clearTimeout(advanceTimeoutRef.current);
     advanceTimeoutRef.current = setTimeout(async () => {
       try {
         await supabase.rpc('advance_question', { p_round: 2 });
@@ -323,12 +305,30 @@ export default function Round2Engine({ participant }) {
         console.error('Advance question error:', err);
       }
     }, TRANSITION_DELAY_MS);
-  }, [roundState, hasAnswered]);
+  }, []);
+
+  const handleTimeUp = useCallback(() => {
+    if (!roundState || roundState.status !== 'active') return;
+
+    if (!hasAnswered) {
+      setHasAnswered(true);
+    }
+
+    // R9 — the countdown no longer reveals anything. With an answer locked
+    // in the timer is frozen and this never fires; reaching zero therefore
+    // only means nobody locked one in, and the question is over.
+    settleQuestion();
+  }, [roundState, hasAnswered, settleQuestion]);
+
+  // R9 — the host's reveal is what closes a question that was answered.
+  useEffect(() => {
+    if (!revealed) return;
+    settleQuestion();
+  }, [revealed, settleQuestion]);
 
   // Cancel pending timers if we unmount first. (ISSUES 3.9)
   useEffect(() => () => {
     clearTimeout(advanceTimeoutRef.current);
-    clearTimeout(revealTimeoutRef.current);
   }, []);
 
   const handleBack = useCallback(() => {
@@ -348,6 +348,11 @@ export default function Round2Engine({ participant }) {
   // Per-question time wins over the round default. (R8)
   const questionDurationMs =
     currentQuestion?.duration_ms ?? roundState?.question_duration_ms ?? DEFAULT_DURATION_MS;
+
+  // R9 — the host has the answer; the clock stops there and stays stopped for
+  // this question. Revealing does not restart it, so the countdown can never
+  // run out from under an answer that is already in.
+  const answerLocked = selectedOption !== null;
 
   // Render logic
 
@@ -455,7 +460,7 @@ export default function Round2Engine({ participant }) {
               startedAtMs={questionAnchor}
               durationMs={questionDurationMs}
               onTimeUp={handleTimeUp}
-              isPaused={gamePhase === 'transition' || gamePhase === 'held'}
+              isPaused={answerLocked || gamePhase === 'transition' || gamePhase === 'held'}
             />
           </div>
 
@@ -488,7 +493,11 @@ export default function Round2Engine({ participant }) {
         {/* Manual mode: the host decides when the next question goes live (R5) */}
         {gamePhase === 'held' && (
           <div className="r2-transition r2-transition--held">
-            <p>Time&rsquo;s up — waiting for the host&rsquo;s next question…</p>
+            <p>
+              {revealed
+                ? 'Waiting for the host’s next question…'
+                : 'Time’s up — waiting for the host’s next question…'}
+            </p>
             <span className="r2-spinner" />
           </div>
         )}

@@ -10,6 +10,11 @@ import { useState, useEffect, useRef, useId } from 'react';
  *
  * R6 — client-side countdown: counts down from `startedAtMs`, the local
  * timestamp taken when this client rendered the question. See round1/TimerRing.
+ *
+ * R9 — `isPaused` is a real freeze, not just a stopped repaint: time spent
+ * paused is accumulated and subtracted from the elapsed clock, so the host
+ * locking an answer in mid-question holds the numeral where it stood and a
+ * resume picks up from there instead of jumping to wall-clock time.
  */
 
 const RING_RADIUS = 49;
@@ -24,6 +29,10 @@ export default function TimerRing({
   const [remainingMs, setRemainingMs] = useState(durationMs);
   const rafRef = useRef(null);
   const hasCalledTimeUp = useRef(false);
+  // Total time this countdown has spent paused, and when the current pause
+  // began (null while running).
+  const pausedTotalRef = useRef(0);
+  const pausedAtRef = useRef(null);
   const onTimeUpRef = useRef(onTimeUp);
   // useId() embeds colons; strip them so the ids stay safe to reference.
   const gradId = useId().replace(/:/g, '');
@@ -34,13 +43,23 @@ export default function TimerRing({
 
   useEffect(() => {
     hasCalledTimeUp.current = false;
+    pausedTotalRef.current = 0;
+    pausedAtRef.current = null;
     setRemainingMs(durationMs);
   }, [startedAtMs, durationMs]);
 
   useEffect(() => {
     if (isPaused) {
+      // Start the clock on the pause itself, so the frozen numeral is not
+      // paid for out of the answer window when the countdown resumes.
+      if (pausedAtRef.current === null) pausedAtRef.current = Date.now();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       return;
+    }
+
+    if (pausedAtRef.current !== null) {
+      pausedTotalRef.current += Date.now() - pausedAtRef.current;
+      pausedAtRef.current = null;
     }
 
     // R6 - the anchor is a local timestamp handed down by the engine (the
@@ -48,7 +67,7 @@ export default function TimerRing({
     const startedAt = startedAtMs || Date.now();
 
     const tick = () => {
-      const elapsed = Date.now() - startedAt;
+      const elapsed = Date.now() - startedAt - pausedTotalRef.current;
       const remaining = Math.max(0, durationMs - elapsed);
       setRemainingMs(remaining);
 
@@ -137,7 +156,11 @@ export default function TimerRing({
           {seconds}
         </span>
       </div>
-      {remainingMs <= 0 && <span className="timer-caption">Time&rsquo;s up</span>}
+      {remainingMs <= 0 ? (
+        <span className="timer-caption">Time&rsquo;s up</span>
+      ) : isPaused ? (
+        <span className="timer-caption">Paused</span>
+      ) : null}
     </div>
   );
 }

@@ -476,6 +476,22 @@ h1, h2, h3, h4 {
   height: 100%;
 }
 
+/* Dome variant (Round 1): the top half of the coin, resting flat on the
+   question panel's gold rail exactly as in question_styling3.png. */
+.timer-card--dome {
+  gap: 0;
+  width: 100%;
+}
+
+.timer-ring-wrap--dome {
+  /* 124 x 60 keeps the 120x58 viewBox unstretched */
+  height: 60px;
+  /* Overlap the panel border by a hair so the flat edge reads as one rail */
+  margin-bottom: -1px;
+  z-index: 2;
+  filter: drop-shadow(0 -4px 16px rgba(0, 0, 0, 0.5));
+}
+
 /* The digits: brushed champagne-gold, like the stamped numeral on the coin */
 .timer-center-text {
   position: absolute;
@@ -483,17 +499,30 @@ h1, h2, h3, h4 {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Poppins', sans-serif;
-  font-weight: 700;
+  /* Anton: the heavy condensed numerals stamped on the show's coin */
+  font-family: 'Anton', 'Poppins', sans-serif;
+  font-weight: 400;
   font-size: 44px;
   line-height: 1;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.01em;
   background: linear-gradient(180deg, #FFFDF5 0%, var(--champagne-gold) 45%, #C9A227 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
   pointer-events: none;
+}
+
+.timer-card--dome .timer-caption {
+  /* Above the dome, so it never lands on top of the question panel */
+  order: -1;
+  margin-bottom: 4px;
+}
+
+.timer-ring-wrap--dome .timer-center-text {
+  font-size: 40px;
+  /* Ride a little low, centred on the face rather than on the box */
+  padding-top: 5px;
 }
 
 .timer-center-text--urgent {
@@ -525,6 +554,15 @@ h1, h2, h3, h4 {
 
   .timer-center-text {
     font-size: 37px;
+  }
+
+  .timer-ring-wrap--dome {
+    height: 50px;
+  }
+
+  .timer-ring-wrap--dome .timer-center-text {
+    font-size: 33px;
+    padding-top: 4px;
   }
 }
 

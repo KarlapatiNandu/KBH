@@ -1,0 +1,21 @@
+-- ============================================================
+-- KBH Migration v6
+-- Safe to run against an existing database. Idempotent.
+-- Run this FIRST, then re-run rpcs.sql.
+--
+-- Host-controlled answer reveal (R9):
+--   * responses.revealed_at — when the host chose to show this answer on
+--     the contestant's screen. NULL means the lock-in is in, but the
+--     verdict is still hidden: the participant screen holds the gold
+--     "locked in" highlight and its countdown freezes until the host hits
+--     Reveal in the admin panel. Previously the countdown running out was
+--     what revealed the answer, which gave the host no say in the timing.
+--
+--     Kept on `responses` rather than `round_state` so it is scoped to the
+--     one answer it describes: clearing answers on re-serve (serve_question)
+--     deletes the row and the reveal resets with it, and the participant
+--     client already polls this row, so the reveal rides the delivery path
+--     that is proven on venue wifi.
+-- ============================================================
+
+ALTER TABLE responses ADD COLUMN IF NOT EXISTS revealed_at TIMESTAMPTZ;

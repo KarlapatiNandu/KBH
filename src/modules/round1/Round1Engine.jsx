@@ -555,16 +555,19 @@ function Round1Styles() {
         font-weight: 700;
       }
 
-      /* Timer coin sits centred above the question card (question_styling3) */
+      /* Timer dome rests flat on the question card (question_styling3) */
       .r1-layout {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: var(--space-md);
+        gap: 0;
       }
 
       .r1-timer-col {
         flex-shrink: 0;
+        width: 100%;
+        display: flex;
+        justify-content: center;
       }
 
       .r1-question-col {

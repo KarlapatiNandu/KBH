@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS responses (
   response_time_ms  INT NOT NULL,           -- client-measured, server-clamped (R6)
   points_awarded    INT NOT NULL DEFAULT 0,
   created_at        TIMESTAMPTZ DEFAULT now(),
+  -- When the host chose to show this answer on the contestant's screen (R9).
+  -- NULL = locked in but still hidden; the participant countdown freezes
+  -- until host_reveal_answer stamps this.
+  revealed_at       TIMESTAMPTZ,
 
   -- Block duplicate submissions
   UNIQUE (participant_id, question_id)

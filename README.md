@@ -61,6 +61,13 @@ re-run `supabase/rpcs.sql`. It adds `host_submit_answer` and makes
 gets an optional **Time (s)** (blank = the round default) and a free-text
 **Prize** (e.g. `₹10,000`) shown on the Round 2 screen.
 
+**Upgrading to host-controlled reveal (R9):** run `supabase/migration_v6.sql`,
+then re-run `supabase/rpcs.sql`. Locking a hot seat answer in now freezes the
+contestant's countdown and shows only the gold lock-in; the verdict appears on
+their screen when the host clicks **Reveal answer** in the hot seat panel
+(`host_reveal_answer` stamps `responses.revealed_at`). The timer running out no
+longer reveals anything by itself.
+
 ### 3. Admin account
 
 The admin is a single Supabase Auth user. Create it once in the dashboard —
