@@ -450,28 +450,33 @@ h1, h2, h3, h4 {
   gap: 12px;
 }
 
-/* ===== Timer Ring ===== */
+/* ===== Timer Medallion =====
+   Gold-rimmed countdown coin that sits above the question bar, in the
+   shape used by the show (assets and references/question_styling3.png).
+   Shared by both rounds; each round only swaps the arc colour. */
 .timer-card {
-  background: var(--deep-midnight);
-  border-radius: var(--radius-xl);
-  padding: var(--space-lg);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  box-shadow: var(--shadow-card);
+  gap: 6px;
+  background: transparent;
+  padding: 0;
 }
 
 .timer-ring-wrap {
   position: relative;
-  width: 180px;
-  height: 180px;
+  width: 124px;
+  height: 124px;
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.45));
 }
 
 .timer-ring-wrap svg {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
+/* The digits: brushed champagne-gold, like the stamped numeral on the coin */
 .timer-center-text {
   position: absolute;
   inset: 0;
@@ -480,18 +485,47 @@ h1, h2, h3, h4 {
   justify-content: center;
   font-family: 'Poppins', sans-serif;
   font-weight: 700;
-  font-size: 40px;
-  color: var(--cloud-white);
+  font-size: 44px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  background: linear-gradient(180deg, #FFFDF5 0%, var(--champagne-gold) 45%, #C9A227 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
   pointer-events: none;
+}
+
+.timer-center-text--urgent {
+  background: linear-gradient(180deg, #FFE9EA 0%, #FF9AA0 45%, var(--danger-red) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: timerPulse 0.5s ease-in-out infinite;
+}
+
+@keyframes timerPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.09); }
 }
 
 .timer-caption {
   font-family: 'Inter', sans-serif;
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 600;
+  font-size: 11px;
   text-transform: uppercase;
-  color: var(--pale-gold);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.14em;
+  color: var(--danger-red);
+}
+
+@media (max-width: 480px) {
+  .timer-ring-wrap {
+    width: 104px;
+    height: 104px;
+  }
+
+  .timer-center-text {
+    font-size: 37px;
+  }
 }
 
 /* ===== Responsive ===== */

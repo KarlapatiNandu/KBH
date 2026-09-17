@@ -1,15 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 
 /**
  * Module 5 — TimerRing (Round 2)
  *
- * Renders an SVG ring countdown timer.
+ * The same gold countdown coin the Fastest Finger round uses (shaped after
+ * assets and references/question_styling3.png) — shared `.timer-*` styles
+ * live in modules/shared/styles.css. Only the arc colour differs: the hot
+ * seat runs amber-first to match the round's accent.
  *
  * R6 — client-side countdown: counts down from `startedAtMs`, the local
  * timestamp taken when this client rendered the question. See round1/TimerRing.
  */
 
-const RING_RADIUS = 78;
+const RING_RADIUS = 49;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export default function TimerRing({
@@ -22,6 +25,8 @@ export default function TimerRing({
   const rafRef = useRef(null);
   const hasCalledTimeUp = useRef(false);
   const onTimeUpRef = useRef(onTimeUp);
+  // useId() embeds colons; strip them so the ids stay safe to reference.
+  const gradId = useId().replace(/:/g, '');
 
   useEffect(() => {
     onTimeUpRef.current = onTimeUp;
@@ -69,31 +74,50 @@ export default function TimerRing({
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction);
   const seconds = Math.ceil(remainingMs / 1000);
 
-  // For Hot Seat, let's use amber instead of aqua for the main color
+  // Hot seat runs amber rather than gold, then deepens to red
   const getTimerColor = () => {
-    if (fraction > 0.5) return 'var(--warning-amber)';
-    if (fraction > 0.25) return '#f57c00'; // dark orange
-    return 'var(--danger-red)';
+    if (fraction > 0.5) return '#E8871E';
+    if (fraction > 0.25) return '#F57C00';
+    return '#E5484D';
   };
 
   const timerColor = getTimerColor();
-  const isUrgent = fraction <= 0.25 && remainingMs > 0;
+  const isUrgent = fraction <= 0.25;
 
   return (
-    <div className="r2-timer-card">
-      <div className="r2-timer-ring-wrap">
-        <svg width="180" height="180" viewBox="0 0 180 180">
+    <div className="timer-card">
+      <div className="timer-ring-wrap">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <linearGradient id={`${gradId}-rim`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#F7E7A0" />
+              <stop offset="50%" stopColor="#F2B705" />
+              <stop offset="100%" stopColor="#A9822F" />
+            </linearGradient>
+            <radialGradient id={`${gradId}-face`} cx="50%" cy="18%" r="85%">
+              <stop offset="0%" stopColor="#1d2f7d" />
+              <stop offset="60%" stopColor="#12205e" />
+              <stop offset="100%" stopColor="#070f33" />
+            </radialGradient>
+          </defs>
+
+          {/* Outer bezel */}
+          <circle cx="60" cy="60" r="56" fill="none" stroke={`url(#${gradId}-rim)`} strokeWidth="2.5" />
+
+          {/* Track the arc drains along */}
           <circle
-            cx="90"
-            cy="90"
+            cx="60"
+            cy="60"
             r={RING_RADIUS}
             fill="none"
-            stroke="rgba(245,166,35,0.12)"
+            stroke="rgba(4,10,36,0.9)"
             strokeWidth="8"
           />
+
+          {/* Remaining time */}
           <circle
-            cx="90"
-            cy="90"
+            cx="60"
+            cy="60"
             r={RING_RADIUS}
             fill="none"
             stroke={timerColor}
@@ -101,68 +125,19 @@ export default function TimerRing({
             strokeLinecap="round"
             strokeDasharray={RING_CIRCUMFERENCE}
             strokeDashoffset={dashOffset}
-            transform="rotate(-90 90 90)"
+            transform="rotate(-90 60 60)"
             style={{ transition: 'stroke 0.3s ease' }}
           />
+
+          {/* Face the numeral is stamped on */}
+          <circle cx="60" cy="60" r="43" fill={`url(#${gradId}-face)`} />
+          <circle cx="60" cy="60" r="43" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
         </svg>
-        <span
-          className={`r2-timer-center-text ${isUrgent ? 'r2-timer-center-text--urgent' : ''}`}
-          style={{ color: timerColor }}
-        >
+        <span className={`timer-center-text ${isUrgent ? 'timer-center-text--urgent' : ''}`}>
           {seconds}
         </span>
       </div>
-      <span className="r2-timer-caption">
-        {remainingMs <= 0 ? "Time's up!" : 'Seconds remaining'}
-      </span>
-
-      <style>{`
-        .r2-timer-card {
-          background: rgba(11,20,64,0.6);
-          border: 1px solid rgba(245,166,35,0.2);
-          border-radius: var(--radius-lg);
-          padding: var(--space-xl);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: var(--space-md);
-          box-shadow: var(--shadow-card);
-        }
-        
-        .r2-timer-ring-wrap {
-          position: relative;
-          width: 180px;
-          height: 180px;
-        }
-
-        .r2-timer-center-text {
-          position: absolute;
-          inset: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: 'Poppins', sans-serif;
-          font-size: 48px;
-          font-weight: 700;
-        }
-
-        .r2-timer-caption {
-          font-family: 'Inter', sans-serif;
-          font-size: 14px;
-          color: var(--pale-gold);
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .r2-timer-center-text--urgent {
-          animation: r2timerPulse 0.5s ease-in-out infinite;
-        }
-
-        @keyframes r2timerPulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.08); }
-        }
-      `}</style>
+      {remainingMs <= 0 && <span className="timer-caption">Time&rsquo;s up</span>}
     </div>
   );
 }

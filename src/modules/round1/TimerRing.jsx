@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 
 /**
  * Module 4 — TimerRing
  *
- * Renders an SVG ring countdown timer.
+ * The countdown coin: a gold-rimmed medallion carrying the seconds left,
+ * sized and shaped like the one that sits above the show's question bar
+ * (assets and references/question_styling3.png). The rim doubles as the
+ * progress arc, draining clockwise as the question runs out.
  *
  * R6 — the countdown is fully client-side. It counts down from `startedAtMs`,
  * a local timestamp taken when this client rendered the question, so every
@@ -18,7 +21,7 @@ import { useState, useEffect, useRef } from 'react';
  *   isPaused     — if true, freezes the ring (transitions / manual-mode hold)
  */
 
-const RING_RADIUS = 78;
+const RING_RADIUS = 49;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export default function TimerRing({
@@ -31,6 +34,8 @@ export default function TimerRing({
   const rafRef = useRef(null);
   const hasCalledTimeUp = useRef(false);
   const onTimeUpRef = useRef(onTimeUp);
+  // useId() embeds colons; strip them so the ids stay safe to reference.
+  const gradId = useId().replace(/:/g, '');
 
   // Keep callback ref fresh without re-triggering effect
   useEffect(() => {
@@ -82,33 +87,50 @@ export default function TimerRing({
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction);
   const seconds = Math.ceil(remainingMs / 1000);
 
-  // Color transitions: green → amber → red
+  // Arc colour transitions: gold → amber → red
   const getTimerColor = () => {
-    if (fraction > 0.5) return 'var(--spotlight-gold)';
-    if (fraction > 0.25) return 'var(--warning-amber)';
-    return 'var(--danger-red)';
+    if (fraction > 0.5) return '#F2B705';
+    if (fraction > 0.25) return '#E8871E';
+    return '#E5484D';
   };
 
   const timerColor = getTimerColor();
-  const isUrgent = fraction <= 0.25 && remainingMs > 0;
+  const isUrgent = fraction <= 0.25;
 
   return (
     <div className="timer-card">
       <div className="timer-ring-wrap">
-        <svg width="180" height="180" viewBox="0 0 180 180">
-          {/* Background ring */}
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <linearGradient id={`${gradId}-rim`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#F7E7A0" />
+              <stop offset="50%" stopColor="#F2B705" />
+              <stop offset="100%" stopColor="#A9822F" />
+            </linearGradient>
+            <radialGradient id={`${gradId}-face`} cx="50%" cy="18%" r="85%">
+              <stop offset="0%" stopColor="#1d2f7d" />
+              <stop offset="60%" stopColor="#12205e" />
+              <stop offset="100%" stopColor="#070f33" />
+            </radialGradient>
+          </defs>
+
+          {/* Outer bezel */}
+          <circle cx="60" cy="60" r="56" fill="none" stroke={`url(#${gradId}-rim)`} strokeWidth="2.5" />
+
+          {/* Track the arc drains along */}
           <circle
-            cx="90"
-            cy="90"
+            cx="60"
+            cy="60"
             r={RING_RADIUS}
             fill="none"
-            stroke="rgba(242,183,5,0.12)"
+            stroke="rgba(4,10,36,0.9)"
             strokeWidth="8"
           />
-          {/* Active ring */}
+
+          {/* Remaining time */}
           <circle
-            cx="90"
-            cy="90"
+            cx="60"
+            cy="60"
             r={RING_RADIUS}
             fill="none"
             stroke={timerColor}
@@ -116,31 +138,19 @@ export default function TimerRing({
             strokeLinecap="round"
             strokeDasharray={RING_CIRCUMFERENCE}
             strokeDashoffset={dashOffset}
-            transform="rotate(-90 90 90)"
+            transform="rotate(-90 60 60)"
             style={{ transition: 'stroke 0.3s ease' }}
           />
+
+          {/* Face the numeral is stamped on */}
+          <circle cx="60" cy="60" r="43" fill={`url(#${gradId}-face)`} />
+          <circle cx="60" cy="60" r="43" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
         </svg>
-        <span
-          className={`timer-center-text ${isUrgent ? 'timer-center-text--urgent' : ''}`}
-          style={{ color: timerColor }}
-        >
+        <span className={`timer-center-text ${isUrgent ? 'timer-center-text--urgent' : ''}`}>
           {seconds}
         </span>
       </div>
-      <span className="timer-caption">
-        {remainingMs <= 0 ? "Time's up!" : 'Seconds remaining'}
-      </span>
-
-      <style>{`
-        .timer-center-text--urgent {
-          animation: timerPulse 0.5s ease-in-out infinite;
-        }
-
-        @keyframes timerPulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.08); }
-        }
-      `}</style>
+      {remainingMs <= 0 && <span className="timer-caption">Time&rsquo;s up</span>}
     </div>
   );
 }

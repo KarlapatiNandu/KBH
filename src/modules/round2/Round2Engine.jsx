@@ -18,6 +18,8 @@ import Round2Results from './Round2Results';
 
 const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
 const DEFAULT_DURATION_MS = 10000; // Fallback if round_state.question_duration_ms is unset
+const LOCK_POLL_MS = 1200;        // How often to look for the host's lock-in
+const LOCK_REVEAL_DELAY_MS = 1500; // Beat of gold highlight before a late reveal
 
 export default function Round2Engine({ participant }) {
   const navigate = useNavigate();
@@ -29,6 +31,10 @@ export default function Round2Engine({ participant }) {
   const [selectedOption, setSelectedOption] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
+  // The host's lock-in lights the option gold straight away; the verdict is
+  // held back until the countdown ends (or, if the host locked in after time
+  // was up, until a short beat of that gold highlight has played).
+  const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState(null);
 
   // R6 - client-side timing. `questionAnchor` is the local wall-clock moment
@@ -38,6 +44,12 @@ export default function Round2Engine({ participant }) {
   const anchorMsRef = useRef(null);
   const anchorKeyRef = useRef(null);
   const advanceTimeoutRef = useRef(null);
+  const revealTimeoutRef = useRef(null);
+  const timeUpRef = useRef(false);
+  const verdictRef = useRef(null);
+  // Signature of the response row as last seen, so repeated polls that find
+  // nothing new cost nothing — no state writes, no re-render.
+  const responseSigRef = useRef(undefined);
 
   const answeredQuestionsRef = useRef(new Set());
 
@@ -127,22 +139,48 @@ export default function Round2Engine({ participant }) {
     );
     if (!currentQ) return;
 
+    // Remember which serve we are reading for: if the host moves on (or
+    // re-serves) while this read is in flight, its result is stale.
+    const servedKey = anchorKeyRef.current;
+
     const existing = await checkExistingResponse(currentQ.id);
+    if (anchorKeyRef.current !== servedKey) return;
+
+    const sig = existing
+      ? `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}`
+      : null;
+    if (sig === responseSigRef.current) return;
+    responseSigRef.current = sig;
+
     if (existing) {
+      const isNewLockIn = !answeredQuestionsRef.current.has(currentQ.id);
       answeredQuestionsRef.current.add(currentQ.id);
       setSelectedOption(existing.selected_option);
-      setLastResult({
+      const verdict = {
         is_correct: existing.is_correct,
         points_awarded: existing.points_awarded,
         response_time_ms: existing.response_time_ms,
-      });
+      };
+      verdictRef.current = verdict;
+      setLastResult(verdict);
       setHasAnswered(true);
+
+      // The countdown already finished before the host locked in, so there
+      // is no timer left to reveal against — show the gold highlight for a
+      // beat, then the verdict.
+      if (isNewLockIn && timeUpRef.current) {
+        clearTimeout(revealTimeoutRef.current);
+        revealTimeoutRef.current = setTimeout(() => setRevealed(true), LOCK_REVEAL_DELAY_MS);
+      }
     } else if (answeredQuestionsRef.current.has(currentQ.id)) {
       // Was locked in, now gone — the host cleared it. Reopen.
       answeredQuestionsRef.current.delete(currentQ.id);
+      clearTimeout(revealTimeoutRef.current);
+      verdictRef.current = null;
       setSelectedOption(null);
       setLastResult(null);
       setHasAnswered(false);
+      setRevealed(false);
     }
   }, [checkExistingResponse]);
 
@@ -163,14 +201,18 @@ export default function Round2Engine({ participant }) {
     };
   }, [participant.participant_id, syncResponse]);
 
-  // Polling fallback while a verdict is pending: realtime delivery to a
-  // phone on venue wifi is not something to bet the hot seat on, and one
-  // client polling a single indexed row every 1.5 s costs nothing.
+  // Polling fallback until the lock-in lands: realtime delivery to a phone
+  // on venue wifi is not something to bet the hot seat on, and one client
+  // polling a single indexed row costs nothing. Deliberately *not* gated on
+  // gamePhase — the host usually locks the answer in after the countdown has
+  // run out, by which point the phase is 'held' (manual mode) or
+  // 'transition', and stopping there is what left the contestant's screen
+  // frozen on an un-locked question.
   useEffect(() => {
-    if (gamePhase !== 'active' || lastResult) return;
-    const id = setInterval(syncResponse, 1500);
+    if (roundState?.status !== 'active') return;
+    const id = setInterval(syncResponse, LOCK_POLL_MS);
     return () => clearInterval(id);
-  }, [gamePhase, lastResult, syncResponse]);
+  }, [roundState?.status, syncResponse]);
 
   // ─── Derive game phase from round_state ──────────────────────
   useEffect(() => {
@@ -218,9 +260,14 @@ export default function Round2Engine({ participant }) {
     setQuestionAnchor(anchoredAt);
 
     answeredQuestionsRef.current.delete(currentQ.id);
+    clearTimeout(revealTimeoutRef.current);
+    timeUpRef.current = false;
+    verdictRef.current = null;
+    responseSigRef.current = undefined;
     setSelectedOption(null);
     setLastResult(null);
     setHasAnswered(false);
+    setRevealed(false);
     setGamePhase('active');
 
     // A response may already exist - page reload, or a re-serve that did not
@@ -228,12 +275,15 @@ export default function Round2Engine({ participant }) {
     checkExistingResponse(currentQ.id).then((existing) => {
       if (!existing) return;
       answeredQuestionsRef.current.add(currentQ.id);
+      responseSigRef.current = `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}`;
       setSelectedOption(existing.selected_option);
-      setLastResult({
+      const verdict = {
         is_correct: existing.is_correct,
         points_awarded: existing.points_awarded,
         response_time_ms: existing.response_time_ms,
-      });
+      };
+      verdictRef.current = verdict;
+      setLastResult(verdict);
       setHasAnswered(true);
     });
   }, [roundState, questionsLoaded, questions, checkExistingResponse]);
@@ -241,8 +291,17 @@ export default function Round2Engine({ participant }) {
   const handleTimeUp = useCallback(async () => {
     if (!roundState || roundState.status !== 'active') return;
 
+    timeUpRef.current = true;
+
     if (!hasAnswered) {
       setHasAnswered(true);
+    }
+
+    // The countdown is what reveals the answer — but only if the host has
+    // already locked one in. If they have not, syncResponse reveals it when
+    // the lock-in arrives.
+    if (verdictRef.current) {
+      setRevealed(true);
     }
 
     // Manual mode: the host is choosing what goes live, so clients must not
@@ -266,8 +325,11 @@ export default function Round2Engine({ participant }) {
     }, TRANSITION_DELAY_MS);
   }, [roundState, hasAnswered]);
 
-  // Cancel a pending advance if we unmount first. (ISSUES 3.9)
-  useEffect(() => () => clearTimeout(advanceTimeoutRef.current), []);
+  // Cancel pending timers if we unmount first. (ISSUES 3.9)
+  useEffect(() => () => {
+    clearTimeout(advanceTimeoutRef.current);
+    clearTimeout(revealTimeoutRef.current);
+  }, []);
 
   const handleBack = useCallback(() => {
     navigate('/');
@@ -403,8 +465,9 @@ export default function Round2Engine({ participant }) {
                 question={currentQuestion}
                 questionNumber={currentQuestionNumber}
                 totalQuestions={questions.length}
-                timeUp={hasAnswered && lastResult === null}
+                timeUp={hasAnswered && selectedOption === null}
                 lastResult={lastResult}
+                revealed={revealed}
                 selectedOption={selectedOption}
               />
             ) : (
