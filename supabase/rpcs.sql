@@ -107,7 +107,8 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Round is not active');
   END IF;
 
-  v_duration := COALESCE(v_round_state.question_duration_ms, 10000);
+  -- Per-question time wins over the round default. (R8)
+  v_duration := COALESCE(v_question.duration_ms, v_round_state.question_duration_ms, 10000);
 
   -- 3. Verify this question is the current one (matched by order_index)
   DECLARE

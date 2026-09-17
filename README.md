@@ -56,6 +56,11 @@ Both `schema.sql` and `migration_v2.sql` are safe to re-run.
 re-run `supabase/rpcs.sql`. It adds `host_submit_answer` and makes
 `submit_response` refuse direct Round 2 submissions.
 
+**Upgrading to per-question time and prize (R8):** run
+`supabase/migration_v5.sql`, then re-run `supabase/rpcs.sql`. Each question
+gets an optional **Time (s)** (blank = the round default) and a free-text
+**Prize** (e.g. `₹10,000`) shown on the Round 2 screen.
+
 ### 3. Admin account
 
 The admin is a single Supabase Auth user. Create it once in the dashboard —

@@ -52,7 +52,7 @@ export default function RoundControl() {
     const { data } = await supabase
       .from('questions')
       // options/correct_option feed the hot seat answer panel (R7)
-      .select('id, round, text, options, correct_option, base_points, order_index')
+      .select('id, round, text, options, correct_option, base_points, prize, duration_ms, order_index')
       .order('order_index');
     if (data) {
       setQuestions({

@@ -11,7 +11,7 @@
  * are display-only.
  *
  * Props:
- *   question        — {id, text, options, correct_option, base_points, order_index}
+ *   question        — {id, text, options, correct_option, base_points, prize, order_index}
  *   questionNumber  — 1-indexed display number
  *   totalQuestions   — total question count
  *   timeUp          — true once the countdown has ended with no answer locked in
@@ -62,6 +62,14 @@ export default function QuestionCard({
         </span>
         <span className="r2-qc-points">{question.base_points} pts</span>
       </div>
+
+      {/* Prize for this question (R8) — the "what you're playing for" line */}
+      {question.prize && (
+        <div className="r2-qc-prize">
+          <span className="r2-qc-prize-label">Playing for</span>
+          <span className="r2-qc-prize-value">{question.prize}</span>
+        </div>
+      )}
 
       {/* Question bar */}
       <div className="r2-rail r2-rail--question">
@@ -189,6 +197,33 @@ export default function QuestionCard({
           background: rgba(245,166,35,0.12);
           padding: 3px 10px;
           border-radius: var(--radius-pill);
+        }
+
+        /* ── Prize ────────────────────────────────────────────── */
+        .r2-qc-prize {
+          display: flex;
+          align-items: baseline;
+          justify-content: center;
+          gap: 10px;
+          margin: calc(-1 * var(--space-sm)) 0 var(--space-lg);
+        }
+
+        .r2-qc-prize-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--pale-gold);
+        }
+
+        .r2-qc-prize-value {
+          font-family: 'Poppins', sans-serif;
+          font-size: 30px;
+          font-weight: 700;
+          line-height: 1;
+          color: var(--spotlight-gold);
+          text-shadow: 0 0 18px rgba(242,183,5,0.45), 0 1px 2px rgba(0,0,0,0.6);
         }
 
         /* ── Rail: the gold line each row of hexes sits on ────── */
@@ -344,7 +379,7 @@ export default function QuestionCard({
 
         /* Locked in by the host, verdict pending — classic amber */
         .r2-hex--selected .r2-hex-inner {
-          background: linear-gradient(180deg, var(--spotlight-gold) 0%, var(--warning-amber) 100%);
+          background: linear-gradient(180deg, var(--champagne-gold) 0%, var(--spotlight-gold) 100%);
           color: var(--deep-midnight);
         }
 
@@ -509,6 +544,10 @@ export default function QuestionCard({
 
           .r2-q-text {
             font-size: 18px;
+          }
+
+          .r2-qc-prize-value {
+            font-size: 24px;
           }
 
           .r2-qc-option-text {

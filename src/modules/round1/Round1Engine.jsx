@@ -202,7 +202,7 @@ export default function Round1Engine({ participant }) {
 
     // R6 - response time measured on this client, from the moment the question
     // rendered here. The server clamps it to the question duration.
-    const durationMs = roundState.question_duration_ms ?? DEFAULT_DURATION_MS;
+    const durationMs = currentQ.duration_ms ?? roundState.question_duration_ms ?? DEFAULT_DURATION_MS;
     const elapsedMs = anchorMsRef.current ? Date.now() - anchorMsRef.current : 0;
     const responseTimeMs = Math.min(Math.max(Math.round(elapsedMs), 0), durationMs);
 
@@ -306,7 +306,9 @@ export default function Round1Engine({ participant }) {
     ? questions.findIndex((q) => q.id === currentQuestion.id) + 1
     : 0;
 
-  const questionDurationMs = roundState?.question_duration_ms ?? DEFAULT_DURATION_MS;
+  // Per-question time wins over the round default. (R8)
+  const questionDurationMs =
+    currentQuestion?.duration_ms ?? roundState?.question_duration_ms ?? DEFAULT_DURATION_MS;
 
   // ─── Render ─────────────────────────────────────────────────
 

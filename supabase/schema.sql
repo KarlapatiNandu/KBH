@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS questions (
   correct_option  INT NOT NULL,             -- 0-based index into options
   base_points     INT NOT NULL DEFAULT 100,
   order_index     INT NOT NULL,
+  -- Per-question countdown; NULL → round_state.question_duration_ms (R8)
+  duration_ms     INT CHECK (duration_ms IS NULL OR duration_ms > 0),
+  -- Free-text prize shown on the Round 2 screen, e.g. "₹10,000" (R8)
+  prize           TEXT,
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 

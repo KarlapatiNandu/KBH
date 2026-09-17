@@ -41,6 +41,13 @@ export default function Round2Engine({ participant }) {
 
   const answeredQuestionsRef = useRef(new Set());
 
+  // Latest round state / questions for callbacks that must not re-subscribe
+  // on every realtime tick.
+  const roundStateRef = useRef(null);
+  const questionsRef = useRef([]);
+  useEffect(() => { roundStateRef.current = roundState; }, [roundState]);
+  useEffect(() => { questionsRef.current = questions; }, [questions]);
+
   // Load questions
   useEffect(() => {
     async function loadQuestions() {
@@ -107,9 +114,38 @@ export default function Round2Engine({ participant }) {
     };
   }, []);
 
-  // R7 — mirror the host's lock-in. An INSERT is the host submitting for
-  // this contestant; a DELETE is the host clearing answers on a re-serve or
-  // reset, which must reopen the question here.
+  // R7 — mirror the host's lock-in. Rather than trusting the realtime
+  // payload, any change to `responses` triggers a re-read of this
+  // contestant's row for the live question: that covers INSERT (host locked
+  // in), DELETE (host cleared on re-serve — DELETE payloads carry only the
+  // PK, so they cannot be filtered) and a missed event alike.
+  const syncResponse = useCallback(async () => {
+    const state = roundStateRef.current;
+    if (!state || state.status !== 'active') return;
+    const currentQ = questionsRef.current.find(
+      (q) => q.order_index === state.current_question_index
+    );
+    if (!currentQ) return;
+
+    const existing = await checkExistingResponse(currentQ.id);
+    if (existing) {
+      answeredQuestionsRef.current.add(currentQ.id);
+      setSelectedOption(existing.selected_option);
+      setLastResult({
+        is_correct: existing.is_correct,
+        points_awarded: existing.points_awarded,
+        response_time_ms: existing.response_time_ms,
+      });
+      setHasAnswered(true);
+    } else if (answeredQuestionsRef.current.has(currentQ.id)) {
+      // Was locked in, now gone — the host cleared it. Reopen.
+      answeredQuestionsRef.current.delete(currentQ.id);
+      setSelectedOption(null);
+      setLastResult(null);
+      setHasAnswered(false);
+    }
+  }, [checkExistingResponse]);
+
   useEffect(() => {
     if (!participant.participant_id) return;
 
@@ -117,45 +153,24 @@ export default function Round2Engine({ participant }) {
       .channel(`round2-engine-responses-${participant.participant_id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'responses',
-          filter: `participant_id=eq.${participant.participant_id}`,
-        },
-        (payload) => {
-          const row = payload.new;
-          if (!row || row.round !== 2) return;
-          answeredQuestionsRef.current.add(row.question_id);
-          setSelectedOption(row.selected_option);
-          setLastResult({
-            is_correct: row.is_correct,
-            points_awarded: row.points_awarded,
-            response_time_ms: row.response_time_ms,
-          });
-          setHasAnswered(true);
-        }
-      )
-      .on(
-        'postgres_changes',
-        // DELETE payloads carry only the primary key unless the table has
-        // REPLICA IDENTITY FULL, so we cannot filter by participant here.
-        // Treat any deletion as "the host cleared answers" and reopen —
-        // a harmless no-op when nothing was locked in for this question.
-        { event: 'DELETE', schema: 'public', table: 'responses' },
-        () => {
-          answeredQuestionsRef.current.clear();
-          setSelectedOption(null);
-          setLastResult(null);
-          setHasAnswered(false);
-        }
+        { event: '*', schema: 'public', table: 'responses' },
+        () => syncResponse()
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [participant.participant_id]);
+  }, [participant.participant_id, syncResponse]);
+
+  // Polling fallback while a verdict is pending: realtime delivery to a
+  // phone on venue wifi is not something to bet the hot seat on, and one
+  // client polling a single indexed row every 1.5 s costs nothing.
+  useEffect(() => {
+    if (gamePhase !== 'active' || lastResult) return;
+    const id = setInterval(syncResponse, 1500);
+    return () => clearInterval(id);
+  }, [gamePhase, lastResult, syncResponse]);
 
   // ─── Derive game phase from round_state ──────────────────────
   useEffect(() => {
@@ -268,7 +283,9 @@ export default function Round2Engine({ participant }) {
     ? questions.findIndex((q) => q.id === currentQuestion.id) + 1
     : 0;
 
-  const questionDurationMs = roundState?.question_duration_ms ?? DEFAULT_DURATION_MS;
+  // Per-question time wins over the round default. (R8)
+  const questionDurationMs =
+    currentQuestion?.duration_ms ?? roundState?.question_duration_ms ?? DEFAULT_DURATION_MS;
 
   // Render logic
 
@@ -278,7 +295,14 @@ export default function Round2Engine({ participant }) {
     return (
       <div className="r2-screen">
         <div className="r2-center">
-          <div className="r2-disabled-icon">🔒</div>
+          <div className="r2-disabled-icon">
+            <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+              <rect x="10" y="24" width="36" height="26" rx="5" fill="var(--spotlight-gold)" />
+              <path d="M18 24v-6a10 10 0 0 1 20 0v6" stroke="var(--spotlight-gold)" strokeWidth="4" strokeLinecap="round" fill="none" />
+              <circle cx="28" cy="35" r="3.5" fill="var(--deep-midnight)" />
+              <rect x="26.5" y="36" width="3" height="7" rx="1.5" fill="var(--deep-midnight)" />
+            </svg>
+          </div>
           <h2 className="r2-waiting-title">Hot Seat in Progress</h2>
           <p className="r2-status-text">Only the selected participant can view these questions.</p>
           <button className="btn btn-secondary r2-back-btn" onClick={handleBack}>
@@ -453,8 +477,8 @@ function Round2Styles() {
       }
 
       .r2-disabled-icon {
-        font-size: 48px;
         margin-bottom: var(--space-sm);
+        filter: drop-shadow(0 0 12px rgba(242,183,5,0.45));
       }
 
       @keyframes r2float {

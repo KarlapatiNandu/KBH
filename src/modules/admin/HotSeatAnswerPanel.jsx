@@ -121,7 +121,10 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
             {hotSeat.name ? <span className="hsa-player-name"> · {hotSeat.name}</span> : null}
           </span>
         </div>
-        <span className="hsa-qnum">Q{position} · {liveQuestion.base_points} pts</span>
+        <span className="hsa-qnum">
+          Q{position} · {liveQuestion.base_points} pts
+          {liveQuestion.prize && <span className="hsa-prize"> · {liveQuestion.prize}</span>}
+        </span>
       </div>
 
       <p className="hsa-question">{liveQuestion.text}</p>
@@ -307,14 +310,15 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
         }
 
         .hsa-opt--confirming {
-          border-color: var(--warning-amber);
-          background: var(--warning-amber);
+          border-color: var(--spotlight-gold);
+          background: var(--spotlight-gold);
           color: var(--deep-midnight);
+          box-shadow: 0 0 0 3px rgba(242,183,5,0.25);
         }
 
         .hsa-opt--confirming .hsa-opt-letter {
           background: var(--deep-midnight);
-          color: var(--warning-amber);
+          color: var(--spotlight-gold);
         }
 
         .hsa-opt--correct {
@@ -348,7 +352,9 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
           min-height: 18px;
         }
 
-        .hsa-pending strong { color: var(--warning-amber); }
+        .hsa-pending strong { color: var(--spotlight-gold); }
+
+        .hsa-prize { color: var(--spotlight-gold); }
 
         .hsa-cancel {
           margin-left: 4px;

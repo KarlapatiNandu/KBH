@@ -38,6 +38,24 @@ function OptionEditor({ options, correctOption, onChange, onCorrectChange }) {
 }
 
 
+// R8 — time is edited in seconds and stored in ms; blank means "use the
+// round default" (round_state.question_duration_ms). Prize is free text.
+const EMPTY_QUESTION = {
+  round: 1,
+  text: '',
+  options: ['', '', '', ''],
+  correct_option: 0,
+  base_points: 100,
+  duration_s: '',
+  prize: '',
+};
+
+const msToSeconds = (ms) => (ms == null ? '' : String(ms / 1000));
+const secondsToMs = (s) => {
+  const n = parseFloat(s);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1000) : null;
+};
+
 export default function QuestionManager() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -46,13 +64,7 @@ export default function QuestionManager() {
   const [editForm, setEditForm] = useState({});
   const [showAdd, setShowAdd] = useState(false);
   const [toast, setToast] = useState(null);
-  const [newQuestion, setNewQuestion] = useState({
-    round: 1,
-    text: '',
-    options: ['', '', '', ''],
-    correct_option: 0,
-    base_points: 100,
-  });
+  const [newQuestion, setNewQuestion] = useState(EMPTY_QUESTION);
 
   useEffect(() => {
     fetchQuestions();
@@ -90,6 +102,8 @@ export default function QuestionManager() {
       options: [...q.options],
       correct_option: q.correct_option,
       base_points: q.base_points,
+      duration_s: msToSeconds(q.duration_ms),
+      prize: q.prize ?? '',
     });
   };
 
@@ -106,6 +120,8 @@ export default function QuestionManager() {
         options: editForm.options,
         correct_option: editForm.correct_option,
         base_points: editForm.base_points,
+        duration_ms: secondsToMs(editForm.duration_s),
+        prize: editForm.prize.trim() || null,
       })
       .eq('id', id);
 
@@ -156,6 +172,8 @@ export default function QuestionManager() {
       options: newQuestion.options,
       correct_option: newQuestion.correct_option,
       base_points: newQuestion.base_points,
+      duration_ms: secondsToMs(newQuestion.duration_s),
+      prize: newQuestion.prize.trim() || null,
       order_index: maxOrder + 1,
     });
 
@@ -164,7 +182,7 @@ export default function QuestionManager() {
     } else {
       showToast('Question added');
       setShowAdd(false);
-      setNewQuestion({ round: 1, text: '', options: ['', '', '', ''], correct_option: 0, base_points: 100 });
+      setNewQuestion(EMPTY_QUESTION);
       fetchQuestions();
     }
   };
@@ -238,6 +256,28 @@ export default function QuestionManager() {
                   onChange={(e) => setNewQuestion({ ...newQuestion, base_points: parseInt(e.target.value) || 0 })}
                 />
               </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Time (s)</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  className="form-input"
+                  placeholder="Round default"
+                  value={newQuestion.duration_s}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, duration_s: e.target.value })}
+                />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Prize</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. ₹10,000"
+                  value={newQuestion.prize}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, prize: e.target.value })}
+                />
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Question Text</label>
@@ -288,6 +328,10 @@ export default function QuestionManager() {
                   </span>
                   <span className="qm-order">#{q.order_index + 1}</span>
                   <span className="qm-points">{q.base_points} pts</span>
+                  <span className="qm-points" title="Countdown for this question">
+                    ⏱ {q.duration_ms != null ? `${q.duration_ms / 1000}s` : 'default'}
+                  </span>
+                  {q.prize && <span className="qm-prize">{q.prize}</span>}
                 </div>
                 <div className="qm-item-actions">
                   <button className="btn-icon" onClick={() => moveQuestion(q, -1)} title="Move up">↑</button>
@@ -325,6 +369,28 @@ export default function QuestionManager() {
                         className="form-input"
                         value={editForm.base_points}
                         onChange={(e) => setEditForm({ ...editForm, base_points: parseInt(e.target.value) || 0 })}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Time (s)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        className="form-input"
+                        placeholder="Round default"
+                        value={editForm.duration_s}
+                        onChange={(e) => setEditForm({ ...editForm, duration_s: e.target.value })}
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">Prize</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. ₹10,000"
+                        value={editForm.prize}
+                        onChange={(e) => setEditForm({ ...editForm, prize: e.target.value })}
                       />
                     </div>
                   </div>
@@ -502,6 +568,13 @@ export default function QuestionManager() {
         .qm-points {
           font-size: 12px;
           color: var(--pale-gold);
+        }
+
+        .qm-prize {
+          font-family: 'Poppins', sans-serif;
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--spotlight-gold);
         }
 
         .qm-item-actions {
