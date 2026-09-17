@@ -511,6 +511,11 @@ h1, h2, h3, h4 {
   color: transparent;
   -webkit-text-fill-color: transparent;
   pointer-events: none;
+  /* Stamped-metal edge: a soft dark drop beneath the numeral and a faint
+     highlight above, echoing the engraved look in question_styling3.png */
+  filter:
+    drop-shadow(0 2px 1px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.2));
 }
 
 .timer-card--dome .timer-caption {

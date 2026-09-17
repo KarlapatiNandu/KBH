@@ -3,10 +3,13 @@ import { useState, useEffect, useRef, useId } from 'react';
 /**
  * Module 5 — TimerRing (Round 2)
  *
- * The same gold countdown coin the Fastest Finger round uses (shaped after
- * assets and references/question_styling3.png) — shared `.timer-*` styles
- * live in modules/shared/styles.css. Only the arc colour differs: the hot
- * seat runs amber-first to match the round's accent.
+ * The countdown dome: a gold-rimmed half-medallion carrying the seconds
+ * left, shaped like the one that rests on the show's question bar (assets
+ * and references/question_styling3.png) — a semi-circle whose flat edge
+ * sits flush on the top rail of the question panel. Same geometry as
+ * round1/TimerRing; only the arc colour differs (amber-first, to match the
+ * hot seat's accent) and the pause handling accumulates paused time instead
+ * of just freezing the repaint.
  *
  * R6 — client-side countdown: counts down from `startedAtMs`, the local
  * timestamp taken when this client rendered the question. See round1/TimerRing.
@@ -17,8 +20,20 @@ import { useState, useEffect, useRef, useId } from 'react';
  * resume picks up from there instead of jumping to wall-clock time.
  */
 
-const RING_RADIUS = 49;
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+// Dome geometry, in the 120x58 viewBox below. The coin's centre sits on the
+// flat edge, at the very bottom of the box, so only the top half of each
+// circle is ever drawn and nothing hangs past the panel it rests on.
+const DOME_CX = 60;
+const DOME_CY = 56.5;
+const BEZEL_RADIUS = 55;
+const FACE_RADIUS = 44;
+const RING_RADIUS = 48.5;
+// Half a circumference: the arc spans the dome from left rim to right rim.
+const RING_ARC_LENGTH = Math.PI * RING_RADIUS;
+
+/** Top-half arc of radius r, swept left rim → right rim. */
+const domeArc = (r) =>
+  `M ${DOME_CX - r} ${DOME_CY} A ${r} ${r} 0 0 1 ${DOME_CX + r} ${DOME_CY}`;
 
 export default function TimerRing({
   startedAtMs,
@@ -90,7 +105,7 @@ export default function TimerRing({
   }, [startedAtMs, durationMs, isPaused]);
 
   const fraction = Math.max(0, remainingMs / durationMs);
-  const dashOffset = RING_CIRCUMFERENCE * (1 - fraction);
+  const dashOffset = RING_ARC_LENGTH * (1 - fraction);
   const seconds = Math.ceil(remainingMs / 1000);
 
   // Hot seat runs amber rather than gold, then deepens to red
@@ -104,16 +119,16 @@ export default function TimerRing({
   const isUrgent = fraction <= 0.25;
 
   return (
-    <div className="timer-card">
-      <div className="timer-ring-wrap">
-        <svg viewBox="0 0 120 120" aria-hidden="true">
+    <div className="timer-card timer-card--dome">
+      <div className="timer-ring-wrap timer-ring-wrap--dome">
+        <svg viewBox="0 0 120 58" aria-hidden="true">
           <defs>
             <linearGradient id={`${gradId}-rim`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#F7E7A0" />
               <stop offset="50%" stopColor="#F2B705" />
               <stop offset="100%" stopColor="#A9822F" />
             </linearGradient>
-            <radialGradient id={`${gradId}-face`} cx="50%" cy="18%" r="85%">
+            <radialGradient id={`${gradId}-face`} cx="50%" cy="8%" r="105%">
               <stop offset="0%" stopColor="#1d2f7d" />
               <stop offset="60%" stopColor="#12205e" />
               <stop offset="100%" stopColor="#070f33" />
@@ -121,36 +136,48 @@ export default function TimerRing({
           </defs>
 
           {/* Outer bezel */}
-          <circle cx="60" cy="60" r="56" fill="none" stroke={`url(#${gradId}-rim)`} strokeWidth="2.5" />
+          <path
+            d={domeArc(BEZEL_RADIUS)}
+            fill="none"
+            stroke={`url(#${gradId}-rim)`}
+            strokeWidth="2.5"
+          />
 
           {/* Track the arc drains along */}
-          <circle
-            cx="60"
-            cy="60"
-            r={RING_RADIUS}
+          <path
+            d={domeArc(RING_RADIUS)}
             fill="none"
             stroke="rgba(4,10,36,0.9)"
-            strokeWidth="8"
+            strokeWidth="7"
           />
 
           {/* Remaining time */}
-          <circle
-            cx="60"
-            cy="60"
-            r={RING_RADIUS}
+          <path
+            d={domeArc(RING_RADIUS)}
             fill="none"
             stroke={timerColor}
-            strokeWidth="8"
-            strokeLinecap="round"
-            strokeDasharray={RING_CIRCUMFERENCE}
+            strokeWidth="7"
+            strokeDasharray={RING_ARC_LENGTH}
             strokeDashoffset={dashOffset}
-            transform="rotate(-90 60 60)"
             style={{ transition: 'stroke 0.3s ease' }}
           />
 
           {/* Face the numeral is stamped on */}
-          <circle cx="60" cy="60" r="43" fill={`url(#${gradId}-face)`} />
-          <circle cx="60" cy="60" r="43" fill="none" stroke="rgba(0,0,0,0.45)" strokeWidth="1" />
+          <path d={`${domeArc(FACE_RADIUS)} Z`} fill={`url(#${gradId}-face)`} />
+          <path
+            d={`${domeArc(FACE_RADIUS)} Z`}
+            fill="none"
+            stroke="rgba(0,0,0,0.45)"
+            strokeWidth="1"
+          />
+
+          {/* Gold rail along the flat edge, where the dome meets the panel */}
+          <path
+            d={`M ${DOME_CX - BEZEL_RADIUS} ${DOME_CY} H ${DOME_CX + BEZEL_RADIUS}`}
+            stroke={`url(#${gradId}-rim)`}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          />
         </svg>
         <span className={`timer-center-text ${isUrgent ? 'timer-center-text--urgent' : ''}`}>
           {seconds}

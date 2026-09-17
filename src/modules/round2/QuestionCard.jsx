@@ -1,3 +1,5 @@
+import TimerRing from './TimerRing';
+
 /**
  * Module 5 — QuestionCard (Round 2)
  *
@@ -17,8 +19,14 @@
  *   timeUp          — true once the countdown has ended with no answer locked in
  *   lastResult      — {is_correct, points_awarded, response_time_ms} or null
  *   revealed        — true once the verdict may be shown; until then a
- *                     locked-in option only lights up gold
+ *                     locked-in option only lights up gold. The reveal is
+ *                     carried entirely by the option bars turning green/red;
+ *                     there is no separate verdict banner.
  *   selectedOption  — the index the host locked in (or null)
+ *   timerStartedAtMs, timerDurationMs, onTimeUp, timerPaused
+ *                   — passed straight through to the countdown dome, which
+ *                     is docked on the question bar rather than floating
+ *                     above the card (assets and references/round2_timer.png)
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
@@ -31,6 +39,10 @@ export default function QuestionCard({
   lastResult,
   revealed = false,
   selectedOption,
+  timerStartedAtMs,
+  timerDurationMs,
+  onTimeUp,
+  timerPaused = false,
 }) {
   // The lock-in shows immediately; the verdict waits for the reveal.
   const showVerdict = revealed && lastResult !== null;
@@ -116,6 +128,16 @@ export default function QuestionCard({
         </div>
       )}
 
+      {/* Countdown dome, resting flat on the question bar's top rail */}
+      <div className="r2-timer-dock">
+        <TimerRing
+          startedAtMs={timerStartedAtMs}
+          durationMs={timerDurationMs}
+          onTimeUp={onTimeUp}
+          isPaused={timerPaused}
+        />
+      </div>
+
       {/* Question bar */}
       <div className="r2-rail r2-rail--question">
         <div className="r2-hex r2-hex--question">
@@ -176,25 +198,6 @@ export default function QuestionCard({
               <span>Say your answer out loud — the host will lock it in for you</span>
             </>
           )}
-        </div>
-      )}
-
-      {/* Result feedback */}
-      {showVerdict && (
-        <div className={`r2-qc-result ${lastResult.is_correct ? 'r2-qc-result--correct' : 'r2-qc-result--wrong'}`}>
-          <span className="r2-qc-result-icon">
-            {lastResult.is_correct ? '🔥' : '❌'}
-          </span>
-          <div className="r2-qc-result-text">
-            <strong>
-              {lastResult.is_correct ? 'Correct!' : 'Wrong!'}
-            </strong>
-            <span className="r2-qc-result-detail">
-              {lastResult.is_correct
-                ? `+${lastResult.points_awarded} points (${(lastResult.response_time_ms / 1000).toFixed(1)}s)`
-                : `The correct answer was ${OPTION_LABELS[question.correct_option]}`}
-            </span>
-          </div>
         </div>
       )}
 
@@ -304,6 +307,18 @@ export default function QuestionCard({
           display: block;
           width: 100%;
           height: 100%;
+        }
+
+        /* ── Timer dock ───────────────────────────────────────── */
+        /* The dome hangs directly off the question bar, so its flat edge
+           reads as part of that bar's top rail — not as a badge floating
+           over the card as a whole. */
+        .r2-timer-dock {
+          position: relative;
+          z-index: 3;
+          display: flex;
+          justify-content: center;
+          padding: 0 var(--space-md);
         }
 
         /* ── Rail: the gold line each row of hexes sits on ────── */
@@ -541,55 +556,6 @@ export default function QuestionCard({
           flex-shrink: 0;
           font-weight: 700;
           font-size: 18px;
-        }
-
-        /* ── Result bar ───────────────────────────────────────── */
-        .r2-qc-result {
-          display: flex;
-          align-items: center;
-          gap: var(--space-md);
-          margin: var(--space-lg) var(--space-md) 0;
-          padding: 14px 18px;
-          border-radius: var(--radius-md);
-          animation: r2resultSlideIn 0.3s ease;
-        }
-
-        .r2-qc-result--correct {
-          background: rgba(74,188,132,0.15);
-          border: 1px solid rgba(74,188,132,0.4);
-        }
-
-        .r2-qc-result--wrong {
-          background: var(--danger-red-soft);
-          border: 1px solid rgba(231,76,94,0.3);
-        }
-
-        .r2-qc-result-icon {
-          font-size: 24px;
-          flex-shrink: 0;
-        }
-
-        .r2-qc-result-text {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-
-        .r2-qc-result-text strong {
-          font-family: 'Poppins', sans-serif;
-          font-size: 16px;
-          color: var(--cloud-white);
-        }
-
-        .r2-qc-result-detail {
-          font-family: 'Inter', sans-serif;
-          font-size: 13px;
-          color: rgba(240, 244, 248, 0.8);
-        }
-
-        @keyframes r2resultSlideIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
         }
 
         /* ── Hint ─────────────────────────────────────────────── */

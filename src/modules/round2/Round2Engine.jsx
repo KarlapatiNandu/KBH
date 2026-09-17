@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import QuestionCard from './QuestionCard';
-import TimerRing from './TimerRing';
 import Round2Results from './Round2Results';
 
 /**
@@ -463,15 +462,6 @@ export default function Round2Engine({ participant }) {
         )}
 
         <div className="r2-layout">
-          <div className="r2-timer-col">
-            <TimerRing
-              startedAtMs={questionAnchor}
-              durationMs={questionDurationMs}
-              onTimeUp={handleTimeUp}
-              isPaused={answerLocked || gamePhase === 'transition' || gamePhase === 'held'}
-            />
-          </div>
-
           <div className="r2-question-col">
             {currentQuestion ? (
               <QuestionCard
@@ -482,6 +472,10 @@ export default function Round2Engine({ participant }) {
                 lastResult={lastResult}
                 revealed={revealed}
                 selectedOption={selectedOption}
+                timerStartedAtMs={questionAnchor}
+                timerDurationMs={questionDurationMs}
+                onTimeUp={handleTimeUp}
+                timerPaused={answerLocked || gamePhase === 'transition' || gamePhase === 'held'}
               />
             ) : (
               <div className="r2-center">
@@ -626,16 +620,12 @@ function Round2Styles() {
         color: var(--warning-amber);
       }
 
-      /* Timer sits centred above the full-width question bar */
+      /* The timer dome lives inside the card, docked on the question bar */
       .r2-layout {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: var(--space-md);
-      }
-
-      .r2-timer-col {
-        flex-shrink: 0;
+        gap: 0;
       }
 
       .r2-question-col {
