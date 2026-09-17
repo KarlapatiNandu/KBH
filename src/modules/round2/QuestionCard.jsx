@@ -1,18 +1,22 @@
-import { useState } from 'react';
-
 /**
  * Module 5 — QuestionCard (Round 2)
  *
- * Renders one question with its 4 option pills.
+ * Renders one question in the classic "hot seat" layout: a wide hexagonal
+ * question bar with a rail running through it, and a 2×2 grid of hexagonal
+ * option bars beneath (see assets and references/question_styling.png).
+ *
+ * R7 — the contestant never picks on this screen. They say their answer to
+ * the host, who locks it in from the admin console; the verdict then lands
+ * here through the responses subscription in Round2Engine. The option bars
+ * are display-only.
  *
  * Props:
  *   question        — {id, text, options, correct_option, base_points, order_index}
  *   questionNumber  — 1-indexed display number
  *   totalQuestions   — total question count
- *   onAnswer(index) — callback when an option is selected
- *   disabled        — true after answering or time's up
+ *   timeUp          — true once the countdown has ended with no answer locked in
  *   lastResult      — {is_correct, points_awarded, response_time_ms} or null
- *   selectedOption  — the index the user picked (or null)
+ *   selectedOption  — the index the host locked in (or null)
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
@@ -21,23 +25,13 @@ export default function QuestionCard({
   question,
   questionNumber,
   totalQuestions,
-  onAnswer,
-  disabled,
+  timeUp,
   lastResult,
   selectedOption,
 }) {
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSelect = async (index) => {
-    if (disabled || submitting || selectedOption !== null) return;
-    setSubmitting(true);
-    await onAnswer(index);
-    setSubmitting(false);
-  };
-
-  // Derive pill styling based on state
-  const getPillClass = (index) => {
-    const classes = ['r2-pill', 'r2-qc-pill'];
+  // Derive hex styling based on state
+  const getHexClass = (index) => {
+    const classes = ['r2-hex', 'r2-hex--option'];
 
     if (selectedOption === null) {
       return classes.join(' ');
@@ -45,22 +39,22 @@ export default function QuestionCard({
 
     if (lastResult) {
       if (index === question.correct_option) {
-        classes.push('r2-qc-pill--correct');
+        classes.push('r2-hex--correct');
       } else if (index === selectedOption && !lastResult.is_correct) {
-        classes.push('r2-qc-pill--wrong');
+        classes.push('r2-hex--wrong');
       } else {
-        classes.push('r2-qc-pill--faded');
+        classes.push('r2-hex--faded');
       }
     } else if (index === selectedOption) {
-      classes.push('r2-pill--selected');
+      classes.push('r2-hex--selected');
     }
 
     return classes.join(' ');
   };
 
   return (
-    <div className="r2-q-card r2-qc-card">
-      {/* Header */}
+    <div className="r2-qc-card">
+      {/* Meta row */}
       <div className="r2-qc-header">
         <span className="r2-q-badge">{questionNumber}</span>
         <span className="r2-qc-counter">
@@ -69,30 +63,61 @@ export default function QuestionCard({
         <span className="r2-qc-points">{question.base_points} pts</span>
       </div>
 
-      {/* Question text */}
-      <p className="r2-q-text">{question.text}</p>
+      {/* Question bar */}
+      <div className="r2-rail r2-rail--question">
+        <div className="r2-hex r2-hex--question">
+          <div className="r2-hex-inner">
+            <p className="r2-q-text">{question.text}</p>
+          </div>
+        </div>
+      </div>
 
-      {/* Options */}
+      {/* Options — two rows of two, each row sharing one rail */}
       <div className="r2-options-grid">
-        {question.options.map((option, index) => (
-          <button
-            key={index}
-            className={getPillClass(index)}
-            onClick={() => handleSelect(index)}
-            disabled={disabled || submitting || selectedOption !== null}
-          >
-            <span className="r2-pill-num">{OPTION_LABELS[index]}</span>
-            <span className="r2-qc-option-text">{option}</span>
-            {/* Feedback icon */}
-            {lastResult && index === question.correct_option && (
-              <span className="r2-qc-feedback-icon r2-qc-feedback-icon--correct">✓</span>
-            )}
-            {lastResult && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
-              <span className="r2-qc-feedback-icon r2-qc-feedback-icon--wrong">✗</span>
-            )}
-          </button>
+        {[0, 1].map((row) => (
+          <div className="r2-rail r2-rail--options" key={row}>
+            {question.options.slice(row * 2, row * 2 + 2).map((option, i) => {
+              const index = row * 2 + i;
+              return (
+                <div className="r2-hex-slot" key={index}>
+                  <div className={getHexClass(index)}>
+                    <span className="r2-hex-inner">
+                      <span className="r2-hex-label">
+                        <span className="r2-pill-num">{OPTION_LABELS[index]}:</span>
+                        <span className="r2-qc-option-text">{option}</span>
+                      </span>
+                      {/* Feedback icon */}
+                      {lastResult && index === question.correct_option && (
+                        <span className="r2-qc-feedback-icon">✓</span>
+                      )}
+                      {lastResult && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
+                        <span className="r2-qc-feedback-icon">✗</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         ))}
       </div>
+
+      {/* Host-controlled: what the contestant should do now */}
+      {!lastResult && (
+        <div className={`r2-qc-hint ${timeUp ? 'r2-qc-hint--timeup' : ''}`}>
+          {timeUp ? (
+            <>
+              <span className="r2-qc-hint-icon">⏱</span>
+              <span>Time&rsquo;s up — waiting for the host</span>
+            </>
+          ) : (
+            <>
+              <span className="r2-qc-hint-icon">🎙</span>
+              <span>Say your answer out loud — the host will lock it in for you</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Result feedback */}
       {lastResult && (
@@ -113,35 +138,31 @@ export default function QuestionCard({
         </div>
       )}
 
-      {/* Submitting overlay */}
-      {submitting && (
-        <div className="r2-qc-submitting">
-          <span className="r2-qc-submitting-dot" />
-          Submitting…
-        </div>
-      )}
-
       <style>{`
-        .r2-q-card {
-          background: rgba(11,20,64,0.6);
-          border: 1px solid rgba(245,166,35,0.2);
-          border-radius: var(--radius-lg);
-          padding: var(--space-xl);
-          box-shadow: var(--shadow-card);
-        }
-        
         .r2-qc-card {
+          --r2-hex-cut: 28px;   /* horizontal depth of the pointed ends */
+          --r2-hex-border: 2px;
+          --r2-hex-clip: polygon(
+            var(--r2-hex-cut) 0,
+            calc(100% - var(--r2-hex-cut)) 0,
+            100% 50%,
+            calc(100% - var(--r2-hex-cut)) 100%,
+            var(--r2-hex-cut) 100%,
+            0 50%
+          );
           position: relative;
-          overflow: hidden;
+          padding: var(--space-md) 0 var(--space-lg);
         }
 
+        /* ── Meta row ─────────────────────────────────────────── */
         .r2-qc-header {
           display: flex;
           align-items: center;
           gap: var(--space-sm);
-          margin-bottom: var(--space-xs);
+          margin-bottom: var(--space-lg);
+          padding: 0 var(--space-md);
         }
-        
+
         .r2-q-badge {
           background: var(--warning-amber);
           color: var(--deep-midnight);
@@ -169,126 +190,227 @@ export default function QuestionCard({
           padding: 3px 10px;
           border-radius: var(--radius-pill);
         }
-        
+
+        /* ── Rail: the gold line each row of hexes sits on ────── */
+        .r2-rail {
+          position: relative;
+          display: grid;
+          align-items: center;
+          padding: 0 var(--space-md);
+        }
+
+        .r2-rail::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 50%;
+          height: 2px;
+          transform: translateY(-50%);
+          background: linear-gradient(
+            90deg,
+            var(--antique-gold),
+            var(--champagne-gold) 50%,
+            var(--antique-gold)
+          );
+          box-shadow: 0 0 6px rgba(242,183,5,0.35);
+          pointer-events: none;
+        }
+
+        .r2-rail--question {
+          grid-template-columns: 1fr;
+          margin-bottom: var(--space-lg);
+        }
+
+        .r2-rail--options {
+          grid-template-columns: 1fr 1fr;
+          column-gap: var(--space-xl);
+        }
+
+        .r2-options-grid {
+          display: grid;
+          row-gap: var(--space-md);
+        }
+
+        /* Slot: per-option rail, only used when options stack on mobile */
+        .r2-hex-slot {
+          position: relative;
+          display: flex;
+          align-items: center;
+          min-width: 0;
+        }
+
+        .r2-hex-slot::before {
+          content: '';
+          display: none;
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 50%;
+          height: 2px;
+          transform: translateY(-50%);
+          background: linear-gradient(
+            90deg,
+            var(--antique-gold),
+            var(--champagne-gold) 50%,
+            var(--antique-gold)
+          );
+          box-shadow: 0 0 6px rgba(242,183,5,0.35);
+          pointer-events: none;
+        }
+
+        /* ── Hex bar: gold shell clipped to a hexagon ─────────── */
+        .r2-hex {
+          position: relative;
+          z-index: 1;
+          width: 100%;
+          padding: var(--r2-hex-border);
+          clip-path: var(--r2-hex-clip);
+          background: linear-gradient(
+            180deg,
+            var(--champagne-gold) 0%,
+            var(--spotlight-gold) 45%,
+            var(--antique-gold) 100%
+          );
+          border: 0;
+          margin: 0;
+          font: inherit;
+          color: var(--cloud-white);
+          text-align: center;
+          filter: drop-shadow(0 4px 12px rgba(0,0,0,0.35));
+        }
+
+        /* Inner face: the midnight fill inside the gold shell */
+        .r2-hex-inner {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+          min-height: 100%;
+          clip-path: var(--r2-hex-clip);
+          background:
+            radial-gradient(ellipse at 50% 0%, rgba(52,24,104,0.9) 0%, transparent 65%),
+            linear-gradient(180deg, #14205c 0%, var(--deep-midnight) 55%, #060c2c 100%);
+          transition: background 0.25s ease, color 0.25s ease;
+        }
+
+        /* Question bar */
+        .r2-hex--question .r2-hex-inner {
+          padding: 18px calc(var(--r2-hex-cut) + 16px);
+          min-height: 84px;
+        }
+
         .r2-q-text {
           font-family: 'Poppins', sans-serif;
           font-size: 22px;
           font-weight: 600;
+          line-height: 1.35;
           color: var(--cloud-white);
-          margin: var(--space-md) 0 var(--space-xl);
-          line-height: 1.4;
-        }
-        
-        .r2-options-grid {
-          display: grid;
-          gap: var(--space-md);
+          margin: 0;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
 
-        .r2-pill {
-          display: flex;
-          align-items: center;
-          gap: var(--space-md);
-          width: 100%;
-          padding: 16px 20px;
-          background: rgba(242,183,5,0.05);
-          border: 1px solid rgba(242,183,5,0.2);
-          border-radius: var(--radius-md);
-          color: var(--cloud-white);
-          font-family: 'Inter', sans-serif;
-          font-size: 16px;
-          font-weight: 500;
-          cursor: pointer;
+        /* Option bars — display-only; the host picks (R7) */
+        .r2-hex--option .r2-hex-inner {
+          padding: 12px calc(var(--r2-hex-cut) + 12px);
+          min-height: 56px;
+          gap: var(--space-sm);
         }
-        
-        .r2-pill-num {
+
+        .r2-hex-label {
           display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 28px;
-          height: 28px;
-          border-radius: 50%;
-          background: rgba(242,183,5,0.15);
+          align-items: baseline;
+          gap: 10px;
+          min-width: 0;
+        }
+
+        .r2-pill-num {
+          font-family: 'Poppins', sans-serif;
+          font-weight: 700;
+          font-size: 18px;
           color: var(--spotlight-gold);
-          font-weight: 600;
-          font-size: 14px;
-        }
-
-        .r2-qc-pill {
-          text-align: left;
-          transition: all 0.25s ease;
-          position: relative;
-        }
-
-        .r2-qc-pill:disabled {
-          cursor: not-allowed;
-          opacity: 0.6;
-        }
-
-        .r2-qc-pill:not(:disabled):hover {
-          transform: translateY(-1px);
-          box-shadow: 0 2px 12px rgba(245,166,35,0.15);
-          border-color: rgba(245,166,35,0.4);
-        }
-        
-        .r2-pill--selected {
-          border-color: var(--warning-amber);
-          background: rgba(245,166,35,0.1);
+          flex-shrink: 0;
+          transition: color 0.25s ease;
         }
 
         .r2-qc-option-text {
-          flex: 1;
+          font-family: 'Inter', sans-serif;
+          font-size: 17px;
+          font-weight: 600;
+          line-height: 1.3;
+          text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+          overflow-wrap: anywhere;
+        }
+
+        /* Locked in by the host, verdict pending — classic amber */
+        .r2-hex--selected .r2-hex-inner {
+          background: linear-gradient(180deg, var(--spotlight-gold) 0%, var(--warning-amber) 100%);
+          color: var(--deep-midnight);
+        }
+
+        .r2-hex--selected .r2-pill-num {
+          color: var(--deep-midnight);
+        }
+
+        .r2-hex--selected .r2-qc-option-text {
+          text-shadow: none;
         }
 
         /* Feedback states */
-        .r2-qc-pill--correct {
-          background: var(--success-green) !important;
-          border-color: var(--success-green) !important;
-          color: var(--deep-midnight) !important;
-          opacity: 1 !important;
+        .r2-hex--correct .r2-hex-inner {
+          background: linear-gradient(180deg, #5fd39a 0%, var(--success-green) 100%);
+          color: var(--deep-midnight);
         }
 
-        .r2-qc-pill--correct .r2-pill-num {
-          background: var(--deep-midnight);
-          color: var(--success-green);
+        .r2-hex--correct .r2-pill-num {
+          color: var(--deep-midnight);
         }
 
-        .r2-qc-pill--wrong {
-          background: var(--danger-red) !important;
-          border-color: var(--danger-red) !important;
-          color: white !important;
-          opacity: 1 !important;
+        .r2-hex--correct .r2-qc-option-text {
+          text-shadow: none;
         }
 
-        .r2-qc-pill--wrong .r2-pill-num {
-          background: rgba(255,255,255,0.2);
-          color: white;
+        .r2-hex--wrong .r2-hex-inner {
+          background: linear-gradient(180deg, #f06a6e 0%, var(--danger-red) 100%);
+          color: #fff;
         }
 
-        .r2-qc-pill--faded {
-          opacity: 0.35 !important;
+        .r2-hex--wrong .r2-pill-num {
+          color: #fff;
+        }
+
+        /* Faded: dim the colours rather than the element, so the rail
+           behind the bar does not show through */
+        .r2-hex--faded {
+          background: linear-gradient(180deg, rgba(169,130,47,0.55) 0%, rgba(169,130,47,0.35) 100%);
+          filter: none;
+        }
+
+        .r2-hex--faded .r2-hex-inner {
+          background: linear-gradient(180deg, #0e1745 0%, #0a1238 100%);
+        }
+
+        .r2-hex--faded .r2-pill-num {
+          color: rgba(242,183,5,0.35);
+        }
+
+        .r2-hex--faded .r2-qc-option-text {
+          color: rgba(245,241,230,0.35);
+          text-shadow: none;
         }
 
         .r2-qc-feedback-icon {
           flex-shrink: 0;
           font-weight: 700;
-          font-size: 16px;
-          margin-left: auto;
+          font-size: 18px;
         }
 
-        .r2-qc-feedback-icon--correct {
-          color: var(--deep-midnight);
-        }
-
-        .r2-qc-feedback-icon--wrong {
-          color: white;
-        }
-
-        /* Result bar */
+        /* ── Result bar ───────────────────────────────────────── */
         .r2-qc-result {
           display: flex;
           align-items: center;
           gap: var(--space-md);
-          margin-top: var(--space-md);
+          margin: var(--space-lg) var(--space-md) 0;
           padding: 14px 18px;
           border-radius: var(--radius-md);
           animation: r2resultSlideIn 0.3s ease;
@@ -332,36 +454,71 @@ export default function QuestionCard({
           to   { opacity: 1; transform: translateY(0); }
         }
 
-        /* Submitting overlay */
-        .r2-qc-submitting {
-          position: absolute;
-          inset: 0;
-          background: rgba(11,20,64,0.85);
+        /* ── Hint ─────────────────────────────────────────────── */
+        .r2-qc-hint {
           display: flex;
           align-items: center;
           justify-content: center;
           gap: var(--space-sm);
+          margin: var(--space-lg) var(--space-md) 0;
+          padding: 12px 18px;
+          border-radius: var(--radius-md);
+          border: 1px dashed rgba(242,183,5,0.35);
+          background: rgba(242,183,5,0.06);
           font-family: 'Inter', sans-serif;
-          font-size: 15px;
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--pale-gold);
+          text-align: center;
+        }
+
+        .r2-qc-hint--timeup {
+          border-color: rgba(232,135,30,0.5);
           color: var(--warning-amber);
-          border-radius: var(--radius-lg);
-          z-index: 5;
         }
 
-        .r2-qc-submitting-dot {
-          width: 8px;
-          height: 8px;
-          background: var(--warning-amber);
-          border-radius: 50%;
-          animation: r2dotPulse 0.8s ease-in-out infinite;
+        .r2-qc-hint-icon {
+          font-size: 18px;
+          flex-shrink: 0;
         }
 
-        @keyframes r2dotPulse {
-          0%, 100% { opacity: 0.3; transform: scale(0.8); }
-          50% { opacity: 1; transform: scale(1.2); }
-        }
+        /* ── Responsive ───────────────────────────────────────── */
+        @media (max-width: 640px) {
+          .r2-qc-card {
+            --r2-hex-cut: 20px;
+          }
 
-        @media (max-width: 480px) {
+          /* Stack options one per row, each on its own rail */
+          .r2-rail--options {
+            grid-template-columns: 1fr;
+            row-gap: var(--space-md);
+            padding: 0;
+          }
+
+          .r2-rail--options::before {
+            display: none;
+          }
+
+          .r2-hex-slot {
+            padding: 0 var(--space-md);
+          }
+
+          .r2-hex-slot::before {
+            display: block;
+          }
+
+          .r2-q-text {
+            font-size: 18px;
+          }
+
+          .r2-qc-option-text {
+            font-size: 15px;
+          }
+
+          .r2-pill-num {
+            font-size: 16px;
+          }
+
           .r2-qc-header {
             flex-wrap: wrap;
           }

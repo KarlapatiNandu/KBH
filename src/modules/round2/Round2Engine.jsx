@@ -10,6 +10,10 @@ import Round2Results from './Round2Results';
  *
  * Core orchestrator for the Hot Seat round.
  * Scoped to round = 2 and active_participant_id.
+ *
+ * R7 — the contestant does not answer on this device. The host locks the
+ * answer in from the admin console (host_submit_answer); this engine watches
+ * the `responses` table and mirrors that lock-in and its verdict here.
  */
 
 const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
@@ -103,6 +107,56 @@ export default function Round2Engine({ participant }) {
     };
   }, []);
 
+  // R7 — mirror the host's lock-in. An INSERT is the host submitting for
+  // this contestant; a DELETE is the host clearing answers on a re-serve or
+  // reset, which must reopen the question here.
+  useEffect(() => {
+    if (!participant.participant_id) return;
+
+    const channel = supabase
+      .channel(`round2-engine-responses-${participant.participant_id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'responses',
+          filter: `participant_id=eq.${participant.participant_id}`,
+        },
+        (payload) => {
+          const row = payload.new;
+          if (!row || row.round !== 2) return;
+          answeredQuestionsRef.current.add(row.question_id);
+          setSelectedOption(row.selected_option);
+          setLastResult({
+            is_correct: row.is_correct,
+            points_awarded: row.points_awarded,
+            response_time_ms: row.response_time_ms,
+          });
+          setHasAnswered(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        // DELETE payloads carry only the primary key unless the table has
+        // REPLICA IDENTITY FULL, so we cannot filter by participant here.
+        // Treat any deletion as "the host cleared answers" and reopen —
+        // a harmless no-op when nothing was locked in for this question.
+        { event: 'DELETE', schema: 'public', table: 'responses' },
+        () => {
+          answeredQuestionsRef.current.clear();
+          setSelectedOption(null);
+          setLastResult(null);
+          setHasAnswered(false);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [participant.participant_id]);
+
   // ─── Derive game phase from round_state ──────────────────────
   useEffect(() => {
     if (!questionsLoaded || !roundState) {
@@ -155,7 +209,7 @@ export default function Round2Engine({ participant }) {
     setGamePhase('active');
 
     // A response may already exist - page reload, or a re-serve that did not
-    // clear responses. Reflect it rather than letting them answer twice.
+    // clear responses. Reflect it so the verdict survives a refresh.
     checkExistingResponse(currentQ.id).then((existing) => {
       if (!existing) return;
       answeredQuestionsRef.current.add(currentQ.id);
@@ -168,71 +222,6 @@ export default function Round2Engine({ participant }) {
       setHasAnswered(true);
     });
   }, [roundState, questionsLoaded, questions, checkExistingResponse]);
-
-  const handleAnswer = useCallback(async (optionIndex) => {
-    if (hasAnswered || !roundState || gamePhase !== 'active') return;
-
-    const currentQ = questions.find(
-      (q) => q.order_index === roundState.current_question_index
-    );
-    if (!currentQ) return;
-
-    setSelectedOption(optionIndex);
-    setHasAnswered(true);
-
-    // R6 - response time measured on this client, from the moment the question
-    // rendered here. The server clamps it to the question duration.
-    const durationMs = roundState.question_duration_ms ?? DEFAULT_DURATION_MS;
-    const elapsedMs = anchorMsRef.current ? Date.now() - anchorMsRef.current : 0;
-    const responseTimeMs = Math.min(Math.max(Math.round(elapsedMs), 0), durationMs);
-
-    try {
-      const { data, error: rpcError } = await supabase.rpc('submit_response', {
-        p_participant_id: participant.participant_id,
-        p_question_id: currentQ.id,
-        p_selected_option: optionIndex,
-        p_response_time_ms: responseTimeMs,
-      });
-
-      if (rpcError) {
-        setError(`Submit failed: ${rpcError.message}`);
-        setLastResult({
-          is_correct: optionIndex === currentQ.correct_option,
-          points_awarded: 0,
-          response_time_ms: 0,
-        });
-        return;
-      }
-
-      if (data && data.success) {
-        answeredQuestionsRef.current.add(currentQ.id);
-        setLastResult({
-          is_correct: data.is_correct,
-          points_awarded: data.points_awarded,
-          response_time_ms: data.response_time_ms,
-        });
-      } else {
-        const errorMsg = data?.error || 'Unknown error';
-        console.warn('Submit response RPC:', errorMsg);
-
-        if (errorMsg === 'Already answered') {
-          const existing = await checkExistingResponse(currentQ.id);
-          if (existing) {
-            answeredQuestionsRef.current.add(currentQ.id);
-            setSelectedOption(existing.selected_option);
-            setLastResult({
-              is_correct: existing.is_correct,
-              points_awarded: existing.points_awarded,
-              response_time_ms: existing.response_time_ms,
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Submit error:', err);
-      setError('Network error submitting answer');
-    }
-  }, [hasAnswered, roundState, gamePhase, questions, participant.participant_id, checkExistingResponse]);
 
   const handleTimeUp = useCallback(async () => {
     if (!roundState || roundState.status !== 'active') return;
@@ -390,8 +379,7 @@ export default function Round2Engine({ participant }) {
                 question={currentQuestion}
                 questionNumber={currentQuestionNumber}
                 totalQuestions={questions.length}
-                onAnswer={handleAnswer}
-                disabled={hasAnswered || gamePhase !== 'active'}
+                timeUp={hasAnswered && lastResult === null}
                 lastResult={lastResult}
                 selectedOption={selectedOption}
               />
@@ -512,7 +500,7 @@ function Round2Styles() {
       }
 
       .r2-game {
-        max-width: 900px;
+        max-width: 1000px;
         margin: 0 auto;
         padding: var(--space-lg) var(--space-md);
         position: relative;
@@ -534,20 +522,20 @@ function Round2Styles() {
         color: var(--warning-amber);
       }
 
+      /* Timer sits centred above the full-width question bar */
       .r2-layout {
         display: flex;
-        gap: var(--space-xl);
-        align-items: flex-start;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-md);
       }
 
       .r2-timer-col {
         flex-shrink: 0;
-        position: sticky;
-        top: var(--space-lg);
       }
 
       .r2-question-col {
-        flex: 1;
+        width: 100%;
         min-width: 0;
       }
 
@@ -590,19 +578,6 @@ function Round2Styles() {
       }
 
       @media (max-width: 640px) {
-        .r2-layout {
-          flex-direction: column;
-          align-items: center;
-        }
-
-        .r2-timer-col {
-          position: static;
-        }
-
-        .r2-question-col {
-          width: 100%;
-        }
-
         .r2-header-title {
           font-size: 16px;
         }

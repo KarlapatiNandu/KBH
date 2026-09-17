@@ -129,7 +129,7 @@ export default function ParticipantHome({ participant, onLogout, onEnterRound })
             title="Hot Seat"
             description={
               isHotSeat
-                ? "You've been selected for the Hot Seat! Get ready to answer."
+                ? "You're in the Hot Seat! Say your answers to the host — they lock them in for you."
                 : "One lucky (or terrified) participant gets the spotlight."
             }
             icon={

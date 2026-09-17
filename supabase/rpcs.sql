@@ -132,7 +132,15 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Already answered');
   END IF;
 
-  -- 5. For round 2, verify the participant is the active hot-seat participant
+  -- 5. Round 2 answers are entered by the host, never by the contestant:
+  --    the hot seat says their answer out loud and the host locks it in
+  --    through host_submit_answer, which sets this transaction-local flag
+  --    before calling in here. (R7)
+  IF v_question.round = 2
+     AND COALESCE(current_setting('kbh.host_submit', true), '') <> 'on' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Round 2 answers are entered by the host');
+  END IF;
+
   IF v_question.round = 2
      AND v_round_state.active_participant_id IS DISTINCT FROM p_participant_id THEN
     RETURN jsonb_build_object('success', false, 'error', 'Not the hot seat participant');
@@ -187,6 +195,62 @@ BEGIN
     'is_correct', v_is_correct,
     'points_awarded', v_points,
     'response_time_ms', v_response_time
+  );
+END;
+$$;
+
+
+-- ─── host_submit_answer ─────────────────────────────────────
+-- The host locks in the hot seat's answer on their behalf. (R7)
+-- Resolves the live Round 2 question and the active participant
+-- server-side, so the admin console only needs to send the option.
+-- Response time is measured from question_started_at on the server
+-- (submit_response's fallback path) — the contestant's own device is
+-- not involved.
+CREATE OR REPLACE FUNCTION host_submit_answer(p_selected_option INT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_round_state RECORD;
+  v_question_id UUID;
+BEGIN
+  SELECT * INTO v_round_state FROM round_state WHERE round = 2;
+  IF NOT FOUND OR v_round_state.status != 'active' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Round 2 is not active');
+  END IF;
+
+  IF v_round_state.active_participant_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No hot seat participant nominated');
+  END IF;
+
+  SELECT id INTO v_question_id
+  FROM questions
+  WHERE round = 2 AND order_index = v_round_state.current_question_index
+  LIMIT 1;
+
+  IF v_question_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No live question');
+  END IF;
+
+  IF p_selected_option IS NULL OR p_selected_option < 0 OR p_selected_option > 3 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Option must be 0–3');
+  END IF;
+
+  -- Transaction-local: submit_response reads this to allow the round 2 write.
+  PERFORM set_config('kbh.host_submit', 'on', true);
+
+  RETURN submit_response(
+    v_round_state.active_participant_id,
+    v_question_id,
+    p_selected_option,
+    NULL
+  ) || jsonb_build_object(
+    'participant_id', v_round_state.active_participant_id,
+    'question_id', v_question_id,
+    'selected_option', p_selected_option
   );
 END;
 $$;

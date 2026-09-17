@@ -6,6 +6,8 @@ A two-round KBC-style class quiz. Vite + React on the front, Supabase
 - **Round 1 — Fastest Finger First:** everyone answers the same questions,
   scored on correctness plus speed.
 - **Round 2 — Hot Seat:** the host nominates one participant to play alone.
+  The contestant's screen is read-only: they say their answer to the host,
+  who locks it in from Round Control.
 
 See [`instructions.md`](instructions.md) for the build spec,
 [`docs/REFINEMENT-PLAN.md`](docs/REFINEMENT-PLAN.md) for the v2 design notes,
@@ -49,6 +51,10 @@ Run these in the Supabase SQL Editor, **in order**.
 | 2 | `supabase/rpcs.sql` | replaces every function with the v2 versions |
 
 Both `schema.sql` and `migration_v2.sql` are safe to re-run.
+
+**Upgrading to host-entered hot seat answers (R7):** no schema change — just
+re-run `supabase/rpcs.sql`. It adds `host_submit_answer` and makes
+`submit_response` refuse direct Round 2 submissions.
 
 ### 3. Admin account
 
@@ -110,7 +116,10 @@ Sign in at `/` on the **Admin** tab (or `/admin/login`).
 - **Participants** — CSV import, network-check status, nominate, reset PIN,
   delete.
 - **Round Control** — start / end / reset each round, pick the hot seat, and the
-  **Question Console**:
+  **Question Console**. While Round 2 is live, a **Lock in answer** panel shows
+  the current question with A–D buttons — click one, then click it again to
+  confirm; the contestant's screen turns green/red instantly. Re-serve with
+  *Clear answers on serve* to replay a question.
   - **Serve** any question at any time, in any order.
   - **Manual mode** (turned on automatically the first time you serve) stops
     participant clients auto-advancing, so nothing moves until you say so.

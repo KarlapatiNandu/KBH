@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import QuestionConsole from './QuestionConsole';
+import HotSeatAnswerPanel from './HotSeatAnswerPanel';
 
 /**
  * Module 2 — Round Control
@@ -11,6 +12,9 @@ import QuestionConsole from './QuestionConsole';
  * The Round 2 hot seat is read from `round_state.active_participant_id`, so a
  * nomination made from the Participants tab or the Live Dashboard shows up
  * here through the same realtime subscription. (R4)
+ *
+ * Round 2 answers are locked in by the host from here, not by the
+ * contestant — see HotSeatAnswerPanel. (R7)
  */
 
 export default function RoundControl() {
@@ -47,7 +51,8 @@ export default function RoundControl() {
   const fetchQuestions = useCallback(async () => {
     const { data } = await supabase
       .from('questions')
-      .select('id, round, text, base_points, order_index')
+      // options/correct_option feed the hot seat answer panel (R7)
+      .select('id, round, text, options, correct_option, base_points, order_index')
       .order('order_index');
     if (data) {
       setQuestions({
@@ -265,7 +270,9 @@ export default function RoundControl() {
           <div className="rc-control-box">
             <p className="rc-desc">
               Nominate one participant for the hot seat. Only they see active
-              questions; everyone else gets a disabled placeholder.
+              questions; everyone else gets a disabled placeholder. The
+              contestant says their answer aloud and you lock it in here —
+              their screen is read-only.
             </p>
 
             <div className="rc-hs-select">
@@ -322,6 +329,13 @@ export default function RoundControl() {
                 </div>
               )}
             </div>
+
+            <HotSeatAnswerPanel
+              roundState={round2}
+              questions={questions[2]}
+              hotSeat={hotSeat}
+              onResult={showToast}
+            />
 
             <QuestionConsole
               round={2}
