@@ -1,4 +1,8 @@
 import TimerRing from './TimerRing';
+import LifelineBar from './LifelineBar';
+import LifelineIcon from './LifelineIcon';
+import AudiencePoll from './AudiencePoll';
+import { lifelineLabel } from './lifelines';
 
 /**
  * Module 5 — QuestionCard (Round 2)
@@ -27,6 +31,37 @@ import TimerRing from './TimerRing';
  *                   — passed straight through to the countdown dome, which
  *                     is docked on the question bar rather than floating
  *                     above the card (assets and references/round2_timer.png)
+ *
+ * R10 — lifelines. The rail of four badges under the question bar is
+ * LifelineBar (assets and references/Lifeline.png), and whichever lifeline
+ * the host has picked rides the crossing point of the option rows as a
+ * medallion (assets and references/Chosen_lifeline_display.png). 50:50 is
+ * the only one that changes the options themselves: the two indices the host
+ * struck come in as `removedOptions` and their bars are emptied out.
+ *
+ *   lifelineStatuses   — { [key]: 'available' | 'active' | 'used' }, or null
+ *                        to leave the rail off the board entirely
+ *   activeLifelineKey  — the lifeline live on THIS question, or null. Drives
+ *                        the LIVE banner: something is actually running.
+ *   chosenLifelineKey  — the lifeline this question belongs to, or null.
+ *                        Drives the medallion, and comes up as soon as the
+ *                        host picks the lifeline — a beat before it is
+ *                        played, which is when the contestant names it. (R12)
+ *   lifelineHolding    — true while a lifeline still has the countdown: picked
+ *                        and not yet played, playing, or (the poll) still on
+ *                        screen. It is what decides whether the banner below
+ *                        reads LIVE, PICKED or TIME UP. (R13)
+ *   removedOptions     — 0-based indices struck by 50:50 on this question
+ *
+ * R11 — the Audience Poll now comes back with a result. Once the host ends
+ * the poll the room's tally arrives as `pollVotes` and AudiencePoll draws it
+ * in the card's top-right corner (assets and references/
+ * Audience_pole_Display.png). It sits over the prize bar, which is the only
+ * thing in that corner — the prize fades back while the chart is up and
+ * comes forward again the moment it goes. The chart stays until the host
+ * hides it from the console, which is also what restarts the countdown.
+ *
+ *   pollVotes          — raw vote counts per option, or null for no chart
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
@@ -43,13 +78,40 @@ export default function QuestionCard({
   timerDurationMs,
   onTimeUp,
   timerPaused = false,
+  lifelineStatuses = null,
+  activeLifelineKey = null,
+  chosenLifelineKey = null,
+  lifelineHolding = false,
+  removedOptions = [],
+  pollVotes = null,
 }) {
   // The lock-in shows immediately; the verdict waits for the reveal.
   const showVerdict = revealed && lastResult !== null;
 
+  // R13 — what the banner under the options is announcing. A lifeline that
+  // is actually running reads LIVE; one the host has only picked reads
+  // PICKED, because the contestant's countdown has already stopped for it
+  // and a frozen clock with nothing on screen to explain it reads as a
+  // fault. The odd one out is a call whose own clock has run out while the
+  // host has not yet ended the row: the question clock is already back, so
+  // the line says so rather than insisting it is paused.
+  const bannerKey = activeLifelineKey || (lifelineHolding ? chosenLifelineKey : null);
+  const bannerLive = !!activeLifelineKey;
+
+  // 50:50 — the two the host struck off this question. (R10)
+  const isStruck = (index) => removedOptions.includes(index);
+
   // Derive hex styling based on state
   const getHexClass = (index) => {
     const classes = ['r2-hex', 'r2-hex--option'];
+
+    // A struck option is out of the running: it keeps its bar (so the grid
+    // does not reflow mid-question) but loses its letter and its text, and
+    // no later verdict styling applies to it.
+    if (isStruck(index)) {
+      classes.push('r2-hex--struck');
+      return classes.join(' ');
+    }
 
     if (selectedOption === null) {
       return classes.join(' ');
@@ -72,8 +134,11 @@ export default function QuestionCard({
     return classes.join(' ');
   };
 
+  // R11 — the poll chart lands in the same corner as the prize.
+  const showPoll = Array.isArray(pollVotes) && pollVotes.length > 0;
+
   return (
-    <div className="r2-qc-card">
+    <div className={`r2-qc-card ${showPoll ? 'r2-qc-card--poll' : ''}`}>
       {/* Meta row */}
       <div className="r2-qc-header">
         <span className="r2-q-badge">{questionNumber}</span>
@@ -128,6 +193,16 @@ export default function QuestionCard({
         </div>
       )}
 
+      {/* R11 — the audience's verdict, once the host has published it. In
+          the card's top-right corner on a wide board; in the flow here,
+          above the question, once there is no corner left to put it in. */}
+      {showPoll && (
+        <AudiencePoll
+          votes={pollVotes}
+          labels={OPTION_LABELS.slice(0, pollVotes.length)}
+        />
+      )}
+
       {/* Countdown dome, resting flat on the question bar's top rail */}
       <div className="r2-timer-dock">
         <TimerRing
@@ -147,25 +222,35 @@ export default function QuestionCard({
         </div>
       </div>
 
+      {/* Lifelines — the rail of four badges, as on the show (R10). Null
+          while the database has no lifeline_state to read, so an un-migrated
+          setup shows the board it always did rather than four dead badges. */}
+      {lifelineStatuses && <LifelineBar statuses={lifelineStatuses} />}
+
       {/* Options — two rows of two, each row sharing one rail */}
       <div className="r2-options-grid">
         {[0, 1].map((row) => (
           <div className="r2-rail r2-rail--options" key={row}>
             {question.options.slice(row * 2, row * 2 + 2).map((option, i) => {
               const index = row * 2 + i;
+              const struck = isStruck(index);
               return (
                 <div className="r2-hex-slot" key={index}>
                   <div className={getHexClass(index)}>
                     <span className="r2-hex-inner">
-                      <span className="r2-hex-label">
-                        <span className="r2-pill-num">{OPTION_LABELS[index]}:</span>
-                        <span className="r2-qc-option-text">{option}</span>
-                      </span>
+                      {/* A struck option leaves an empty bar behind — the
+                          same thing 50:50 does on the show. */}
+                      {!struck && (
+                        <span className="r2-hex-label">
+                          <span className="r2-pill-num">{OPTION_LABELS[index]}:</span>
+                          <span className="r2-qc-option-text">{option}</span>
+                        </span>
+                      )}
                       {/* Feedback icon */}
-                      {showVerdict && index === question.correct_option && (
+                      {!struck && showVerdict && index === question.correct_option && (
                         <span className="r2-qc-feedback-icon">✓</span>
                       )}
-                      {showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
+                      {!struck && showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
                         <span className="r2-qc-feedback-icon">✗</span>
                       )}
                     </span>
@@ -175,7 +260,51 @@ export default function QuestionCard({
             })}
           </div>
         ))}
+
+        {/* The lifeline this question belongs to rides the crossing point of
+            the two option rows (assets and references/
+            Chosen_lifeline_display.png). It comes up the moment the host
+            picks it, before it is played — see chosenLifelineKey. */}
+        {chosenLifelineKey && (
+          <span
+            className="r2-chosen-lifeline"
+            role="img"
+            aria-label={`${lifelineLabel(chosenLifelineKey)} chosen`}
+            title={`${lifelineLabel(chosenLifelineKey)} chosen`}
+          >
+            <LifelineIcon lifelineKey={chosenLifelineKey} />
+          </span>
+        )}
       </div>
+
+      {/* The indicator a lifeline puts on this screen — while it is running,
+          and (R13) from the moment it is picked, since that is when the
+          countdown stops. For the Audience Poll this is what is up while the
+          room votes; the chart replaces it once the host ends the poll (R11).
+          The phone lifelines put PhoneOverlay up over the whole board and
+          this line sits underneath it. */}
+      {bannerKey && (
+        <div className={`r2-ll-banner ${bannerLive && lifelineHolding ? '' : 'r2-ll-banner--picked'}`}>
+          <span className="r2-ll-banner-badge">
+            <LifelineIcon lifelineKey={bannerKey} />
+          </span>
+          <span className="r2-ll-banner-text">
+            <strong>{lifelineLabel(bannerKey)}</strong>
+            <span>
+              {!bannerLive
+                ? 'Your clock is paused — the host is setting it up.'
+                : !lifelineHolding
+                  ? 'Time is up on this — your clock is running again.'
+                  : bannerKey === 'audience_poll'
+                    ? 'The audience is voting — your clock is paused.'
+                    : 'The question clock is paused while this runs.'}
+            </span>
+          </span>
+          <span className="r2-ll-banner-live">
+            {!bannerLive ? '● PICKED' : lifelineHolding ? '● LIVE' : '● TIME UP'}
+          </span>
+        </div>
+      )}
 
       {/* Host-controlled: what the contestant should do now */}
       {!showVerdict && (
@@ -262,6 +391,22 @@ export default function QuestionCard({
           justify-content: flex-end;
           padding: 0 var(--space-md);
           margin: calc(-1 * var(--space-sm)) 0 var(--space-md);
+          transition: opacity 0.5s ease;
+        }
+
+        /* The poll chart takes this corner for as long as it is up. The
+           prize does not move — the board must not reflow mid-question —
+           it just steps back, and comes forward again with the next
+           question. (R11) */
+        .r2-qc-card--poll .r2-prize-row {
+          opacity: 0.18;
+        }
+
+        /* Below 720px the chart drops into the flow instead of taking the
+           corner (see AudiencePoll's own breakpoint, deliberately the same
+           number), so nothing is over the prize and it keeps its weight. */
+        @media (max-width: 720px) {
+          .r2-qc-card--poll .r2-prize-row { opacity: 1; }
         }
 
         .r2-prize {
@@ -358,8 +503,134 @@ export default function QuestionCard({
         }
 
         .r2-options-grid {
+          position: relative;   /* anchors the chosen-lifeline medallion */
           display: grid;
           row-gap: var(--space-md);
+        }
+
+        /* ── 50:50 ───────────────────────────────────────────── */
+        /* The bar stays, emptied: the grid must not reflow half-way
+           through a question, and the gap is the point. */
+        .r2-hex--struck {
+          background: linear-gradient(180deg, rgba(169,130,47,0.5) 0%, rgba(169,130,47,0.3) 100%);
+          filter: none;
+        }
+
+        .r2-hex--struck .r2-hex-inner {
+          background: linear-gradient(180deg, #0a1030 0%, #070b24 100%);
+        }
+
+        /* ── Chosen lifeline ─────────────────────────────────── */
+        /* The badge of the lifeline in play, parked on the crossing point
+           of the two option rows. */
+        .r2-chosen-lifeline {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 4;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 76px;
+          height: 48px;
+          border-radius: 50%;
+          border: 2.5px solid transparent;
+          background:
+            linear-gradient(180deg, #14205c 0%, #0a1138 100%) padding-box,
+            linear-gradient(180deg, var(--champagne-gold) 0%, var(--spotlight-gold) 45%, var(--antique-gold) 100%) border-box;
+          color: var(--spotlight-gold);
+          filter: drop-shadow(0 0 14px rgba(242,183,5,0.6));
+          animation: r2ChosenIn 0.35s ease;
+        }
+
+        .r2-chosen-lifeline .ll-icon {
+          width: 52px;
+          height: 32px;
+        }
+
+        @keyframes r2ChosenIn {
+          from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+          to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        /* ── Active-lifeline banner ──────────────────────────── */
+        .r2-ll-banner {
+          display: flex;
+          align-items: center;
+          gap: var(--space-sm);
+          margin: var(--space-lg) var(--space-md) 0;
+          padding: 10px 14px;
+          border-radius: var(--radius-md);
+          border: 1px solid var(--spotlight-gold);
+          background: rgba(242,183,5,0.1);
+        }
+
+        /* Picked but not yet played: the same line, held back a shade. The
+           countdown is stopped either way, but nothing is on air yet. (R13) */
+        .r2-ll-banner--picked {
+          border-color: var(--antique-gold);
+          background: rgba(169,130,47,0.12);
+        }
+
+        .r2-ll-banner--picked .r2-ll-banner-live {
+          color: var(--pale-gold);
+          animation: none;
+        }
+
+        .r2-ll-banner-badge {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 52px;
+          height: 34px;
+          border-radius: 50%;
+          border: 2px solid var(--antique-gold);
+          background: linear-gradient(180deg, #14205c 0%, #0a1138 100%);
+          color: var(--spotlight-gold);
+        }
+
+        .r2-ll-banner-badge .ll-icon {
+          width: 36px;
+          height: 22px;
+        }
+
+        .r2-ll-banner-text {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          flex: 1;
+          min-width: 0;
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          color: var(--pale-gold);
+        }
+
+        .r2-ll-banner-text strong {
+          font-family: 'Poppins', sans-serif;
+          font-size: 14px;
+          color: var(--spotlight-gold);
+        }
+
+        .r2-ll-banner-live {
+          flex-shrink: 0;
+          font-family: 'Poppins', sans-serif;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          color: var(--warning-amber);
+          animation: r2LlLive 1.4s ease-in-out infinite;
+        }
+
+        @keyframes r2LlLive {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.35; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .r2-chosen-lifeline,
+          .r2-ll-banner-live { animation: none; }
         }
 
         /* Slot: per-option rail, only used when options stack on mobile */
@@ -602,6 +873,10 @@ export default function QuestionCard({
           .r2-qc-card {
             --r2-hex-cut: 20px;
           }
+
+          /* Stacked rows leave no crossing point for the medallion to sit
+             on, and it would land on top of an option bar instead. */
+          .r2-chosen-lifeline { display: none; }
 
           /* Stack options one per row, each on its own rail */
           .r2-rail--options {

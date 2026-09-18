@@ -551,6 +551,20 @@ h1, h2, h3, h4 {
   color: var(--danger-red);
 }
 
+/* R10 — the replacement clock a phone lifeline puts up while the question's
+   own countdown is frozen. Same dome, brushed steel instead of gold, so the
+   two clocks are never mistaken for one another. The urgent numerals keep
+   their red, hence the :not() rather than a plain override. */
+.timer-card--lifeline .timer-center-text:not(.timer-center-text--urgent) {
+  background: linear-gradient(180deg, #FFFFFF 0%, #B8E9FA 45%, #3E8FB0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.timer-card--lifeline .timer-caption {
+  color: #7FD4EE;
+}
+
 @media (max-width: 480px) {
   .timer-ring-wrap {
     width: 104px;

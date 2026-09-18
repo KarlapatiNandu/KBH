@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import QuestionCard from './QuestionCard';
 import Round2Results from './Round2Results';
+import PhoneOverlay from './PhoneOverlay';
+import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './lifelines';
 
 /**
  * Module 5 — Round2Engine
@@ -19,11 +21,27 @@ import Round2Results from './Round2Results';
  * until `responses.revealed_at` is stamped (host_reveal_answer). The timer
  * reaching zero no longer reveals anything — it only matters for a question
  * nobody locked an answer into.
+ *
+ * R10 — lifelines are host-driven too, and reach this screen the same way:
+ * `lifeline_state` carries which of the four is available, live or spent, and
+ * everything it draws is scoped to `question_id` so a lifeline played on one
+ * question cannot bleed onto the next. Call an Expert and Phone a Friend
+ * freeze the question countdown and put PhoneOverlay up with a replacement
+ * clock of their own; 50:50 empties two option bars; Audience Poll shows a
+ * LIVE banner while the room votes and then, once the host ends it, the
+ * tally they typed in as a bar chart. The poll freezes the question clock
+ * too, from going live until the host hides the chart again (R11).
+ *
+ * R12/R13 — a lifeline is picked before it is played, and the pick is what
+ * stops the clock. From the moment the host marks the contestant's choice
+ * the countdown is frozen; it starts again when that lifeline is genuinely
+ * over — the 50:50 strike lands, or the call's own clock runs out.
  */
 
 const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
 const DEFAULT_DURATION_MS = 10000; // Fallback if round_state.question_duration_ms is unset
 const LOCK_POLL_MS = 1200;        // How often to look for the host's lock-in / reveal
+const CONTACT_POLL_MS = 3000;     // Refresh of the phone's contact list while a call is live
 
 // Returned by checkExistingResponse when the request itself fell over, so a
 // dropped read is never mistaken for "the host cleared the answer". (R9: a
@@ -37,7 +55,7 @@ export default function Round2Engine({ participant }) {
   const [roundState, setRoundState] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [questionsLoaded, setQuestionsLoaded] = useState(false);
-  const [gamePhase, setGamePhase] = useState('loading'); 
+  const [gamePhase, setGamePhase] = useState('loading');
   const [selectedOption, setSelectedOption] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
@@ -45,6 +63,28 @@ export default function Round2Engine({ participant }) {
   // held back until the host reveals it from the console. (R9)
   const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState(null);
+
+  // R10 — the four lifeline rows, and the phone book the two call lifelines
+  // dial from. `lifelinesLoaded` stays false on a database that has not run
+  // migration_v7, which keeps the whole rail off the screen rather than
+  // showing four lifelines that could never be played.
+  const [lifelines, setLifelines] = useState([]);
+  const [lifelinesLoaded, setLifelinesLoaded] = useState(false);
+  const [contacts, setContacts] = useState([]);
+  // Local anchor for a lifeline's replacement countdown, same reasoning as
+  // `questionAnchor` below: the clock starts when this device is told about
+  // the call, not when the server logged it.
+  const [lifelineAnchor, setLifelineAnchor] = useState(null);
+  const lifelineAnchorKeyRef = useRef(null);
+  // R13 — has the running call's replacement countdown finished on this
+  // device? That is what ends a call and hands the question clock back; the
+  // host getting round to pressing End is bookkeeping after the fact.
+  const [callTimeUp, setCallTimeUp] = useState(false);
+  // Signatures of the last lifeline / contact reads, so a poll that finds
+  // nothing new costs no state write and no re-render — same guard the
+  // response poll uses above.
+  const lifelineSigRef = useRef(undefined);
+  const contactSigRef = useRef(undefined);
 
   // R6 - client-side timing. `questionAnchor` is the local wall-clock moment
   // this client actually rendered the live question; both the countdown and
@@ -132,6 +172,83 @@ export default function Round2Engine({ participant }) {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // R10 — lifeline state. Read whole rather than patched from the realtime
+  // payload: there are four rows total, so a re-read is as cheap as parsing
+  // the event, and it self-heals a missed one.
+  const syncLifelines = useCallback(async () => {
+    const { data, error: fetchError } = await supabase
+      .from('lifeline_state')
+      .select('*')
+      .eq('round', 2);
+
+    // A database without migration_v7 errors here every time. Leave the rail
+    // hidden and say nothing — the host's console is where that gets flagged.
+    if (fetchError) return;
+
+    const rows = data || [];
+    const sig = rows
+      .map((l) => `${l.key}:${l.status}:${l.question_id}:${l.started_at}:${l.duration_ms}:${JSON.stringify(l.removed_options)}:${JSON.stringify(l.poll_votes)}:${l.poll_hidden_at}:${l.picked_at}`)
+      .sort()
+      .join('|');
+    if (sig === lifelineSigRef.current) return;
+    lifelineSigRef.current = sig;
+
+    setLifelines(rows);
+    setLifelinesLoaded(true);
+  }, []);
+
+  const syncContacts = useCallback(async () => {
+    const { data, error: fetchError } = await supabase
+      .from('lifeline_contacts')
+      .select('*')
+      .order('sort_order')
+      .order('created_at');
+
+    if (fetchError) return;
+
+    const rows = data || [];
+    const sig = rows
+      .map((c) => `${c.id}:${c.kind}:${c.name}:${c.detail}:${c.avatar_url}:${c.sort_order}`)
+      .join('|');
+    if (sig === contactSigRef.current) return;
+    contactSigRef.current = sig;
+
+    setContacts(rows);
+  }, []);
+
+  useEffect(() => {
+    syncLifelines();
+    syncContacts();
+
+    const channel = supabase
+      .channel('round2-engine-lifelines')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'lifeline_state' },
+        () => syncLifelines()
+      )
+      // The host can fix a name while the phone is already on screen, so
+      // contact edits have to land live too. (R10)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'lifeline_contacts' },
+        () => syncContacts()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [syncLifelines, syncContacts]);
+
+  // Polling fallback, for the same reason the lock-in has one: realtime to a
+  // phone on venue wifi is not something to bet a lifeline on.
+  useEffect(() => {
+    if (roundState?.status !== 'active') return;
+    const id = setInterval(syncLifelines, LOCK_POLL_MS);
+    return () => clearInterval(id);
+  }, [roundState?.status, syncLifelines]);
 
   // R7 — mirror the host's lock-in. Rather than trusting the realtime
   // payload, any change to `responses` triggers a re-read of this
@@ -361,6 +478,140 @@ export default function Round2Engine({ participant }) {
   // run out from under an answer that is already in.
   const answerLocked = selectedOption !== null;
 
+  // ─── Lifelines (R10) ────────────────────────────────────────
+  // Everything below is scoped to the live question: a lifeline row keeps its
+  // question_id after it is spent, which is exactly what stops a 50:50 struck
+  // on one question from emptying bars on the next.
+  const activeLifeline =
+    (currentQuestion &&
+      lifelines.find(
+        (l) => l.status === 'active' && l.question_id === currentQuestion.id
+      )) ||
+    null;
+
+  // R11 — the audience poll's result. It shows once the host has ended the
+  // poll, which is why this keys off `used` rather than `active`: while the
+  // poll is live the board carries the LIVE banner and nothing else, and the
+  // chart is the publish. Scoped to the question it was played on, like
+  // everything else here, so it leaves with the next serve. A row with no
+  // `poll_votes` at all is a database still on the old schema, or a poll the
+  // host ended without a tally — either way, no chart.
+  const audiencePoll = lifelines.find((l) => l.key === 'audience_poll');
+  const pollVotes =
+    currentQuestion &&
+      audiencePoll?.status === 'used' &&
+      audiencePoll.question_id === currentQuestion.id &&
+      Array.isArray(audiencePoll.poll_votes) &&
+      // The host has not taken it back off the board yet. (R11)
+      !audiencePoll.poll_hidden_at
+      ? audiencePoll.poll_votes
+      : null;
+
+  // R11 — and the poll holds the question clock for as long as it is on
+  // this screen, the way a call does: first the LIVE banner while the room
+  // votes, then the chart, until the host hides it. Nobody can be asked to
+  // think against a running clock while the room's answer is sitting in
+  // front of them. Hiding the chart is what hands the clock back.
+  const pollHolding = activeLifeline?.key === 'audience_poll' || pollVotes !== null;
+
+  // R12 — the medallion on the crossing point of the option rows is the
+  // lifeline this question belongs to, which is not the same thing as the
+  // lifeline that is running. A lifeline is picked first — the contestant
+  // names it, the host marks it, the badge comes up — and played a moment
+  // later. A running lifeline wins over a picked one, so announcing the
+  // next one mid-call cannot pull the badge off the call.
+  const pickedLifeline =
+    (currentQuestion &&
+      lifelines.find((l) => l.picked_at && l.question_id === currentQuestion.id)) ||
+    null;
+
+  const chosenLifeline = activeLifeline || pickedLifeline;
+
+  // R12 — and the rail marks the pick as well as the play. Between naming a
+  // lifeline and the host playing it there is a beat where nothing is
+  // running, and the lit badge is the only thing telling the contestant the
+  // host heard them right. A row that is already live or spent keeps the
+  // status it has: `picked` is the weakest of the three.
+  //
+  // One badge is lit at a time. The host picking a second lifeline moves
+  // the pick (pick_lifeline clears the others), and a lifeline actually
+  // being played takes the rail off a pick that is only named — which is
+  // how starting the Audience Poll, the one lifeline that is never picked,
+  // puts out a 50:50 marked a moment earlier.
+  const pickedBadgeKey = activeLifeline ? null : pickedLifeline?.key;
+
+  const lifelineStatuses = Object.fromEntries(
+    lifelines.map((l) => [
+      l.key,
+      l.status === 'available' && l.key === pickedBadgeKey ? 'picked' : l.status,
+    ])
+  );
+
+  const fiftyFifty = lifelines.find((l) => l.key === 'fifty_fifty');
+  const removedOptions =
+    currentQuestion && fiftyFifty?.question_id === currentQuestion.id
+      ? fiftyFifty.removed_options || []
+      : [];
+
+  // R13 — the pick is what stops the clock, not the play.
+  //
+  // A contestant who has said "50:50" has stopped thinking about the
+  // question and started waiting on the host, who still has to read two
+  // options off the console or dial a number before anything happens.
+  // Running the countdown through that charges them for the host's setup
+  // time, so it freezes the moment the lifeline is marked and starts again
+  // only when that lifeline is genuinely finished. Finished means something
+  // different for each of them:
+  //
+  //   50:50  — the strike lands. Two bars go empty, there is something new
+  //            to think about, and the clock is theirs again.
+  //   a call — the call's own countdown runs out (or the host ends it
+  //            early). `callTimeUp` is this device watching that happen, so
+  //            the question clock comes back on the beat rather than
+  //            whenever the host next looks at the console.
+  //
+  // The Audience Poll is not in here: it is never picked, and `pollHolding`
+  // above already holds the clock from going live until the chart is hidden.
+  const pickHolding = (() => {
+    const key = chosenLifeline?.key;
+    if (!key || key === 'audience_poll') return false;
+    if (chosenLifeline.status === 'used') return false;
+    if (key === 'fifty_fifty') return removedOptions.length === 0;
+    return !callTimeUp;
+  })();
+
+  // Call an Expert / Phone a Friend take the question's clock away and run
+  // one of their own in its place.
+  const phoneLifeline = activeLifeline && isPhoneLifeline(activeLifeline.key)
+    ? activeLifeline
+    : null;
+
+  const phoneContacts = phoneLifeline
+    ? contacts.filter((c) => c.kind === CONTACT_KIND[phoneLifeline.key])
+    : [];
+
+  // R6/R10 — anchor the replacement countdown on this device's clock the
+  // moment it learns the call is on, exactly as the question's own countdown
+  // is anchored. Keyed on started_at so re-playing the lifeline re-anchors.
+  const phoneAnchorKey = phoneLifeline
+    ? `${phoneLifeline.key}:${phoneLifeline.started_at}`
+    : null;
+
+  useEffect(() => {
+    if (lifelineAnchorKeyRef.current === phoneAnchorKey) return;
+    lifelineAnchorKeyRef.current = phoneAnchorKey;
+    setLifelineAnchor(phoneAnchorKey ? Date.now() : null);
+    setCallTimeUp(false);
+  }, [phoneAnchorKey]);
+
+  // The host may still be typing the contact list as the phone goes up, so
+  // it is re-read while a call is live rather than only on a realtime event.
+  useEffect(() => {
+    if (!phoneAnchorKey) return;
+    const id = setInterval(syncContacts, CONTACT_POLL_MS);
+    return () => clearInterval(id);
+  }, [phoneAnchorKey, syncContacts]);
+
   // Render logic
 
   // If we are not the active participant and the round is active/completed, we shouldn't really be here,
@@ -475,7 +726,23 @@ export default function Round2Engine({ participant }) {
                 timerStartedAtMs={questionAnchor}
                 timerDurationMs={questionDurationMs}
                 onTimeUp={handleTimeUp}
-                timerPaused={answerLocked || gamePhase === 'transition' || gamePhase === 'held'}
+                // R10/R11/R13 — the clock is held by whatever the board is
+                // waiting on: a lifeline that has been picked and is not
+                // finished yet, or the audience poll, from going live until
+                // the host hides its result.
+                timerPaused={
+                  answerLocked ||
+                  pickHolding ||
+                  pollHolding ||
+                  gamePhase === 'transition' ||
+                  gamePhase === 'held'
+                }
+                lifelineStatuses={lifelinesLoaded ? lifelineStatuses : null}
+                activeLifelineKey={activeLifeline?.key || null}
+                chosenLifelineKey={chosenLifeline?.key || null}
+                lifelineHolding={pickHolding || pollHolding}
+                removedOptions={removedOptions}
+                pollVotes={pollVotes}
               />
             ) : (
               <div className="r2-center">
@@ -492,13 +759,31 @@ export default function Round2Engine({ participant }) {
           </div>
         )}
 
+        {/* R10 — Call an Expert / Phone a Friend: the phone, its contact list
+            and the replacement countdown, over the whole board.
+
+            R13 — and it comes down the moment the call's clock runs out,
+            because that is when the question clock starts again: leaving the
+            handset over the board would run their countdown behind a screen
+            they cannot read the question through. The lifeline row stays
+            `active` until the host ends it; that is now only bookkeeping. */}
+        {phoneLifeline && !callTimeUp && (
+          <PhoneOverlay
+            lifelineKey={phoneLifeline.key}
+            contacts={phoneContacts}
+            startedAtMs={lifelineAnchor}
+            durationMs={phoneLifeline.duration_ms || DEFAULT_LIFELINE_DURATION_MS}
+            onTimeUp={() => setCallTimeUp(true)}
+          />
+        )}
+
         {/* Manual mode: the host decides when the next question goes live (R5) */}
         {gamePhase === 'held' && (
           <div className="r2-transition r2-transition--held">
             <p>
               {revealed
                 ? 'Waiting for the host’s next question…'
-                : 'Time’s up — waiting for the host’s next question…'}
+                : 'Time’s up,  waiting for the host’s next question…'}
             </p>
             <span className="r2-spinner" />
           </div>

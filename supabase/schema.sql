@@ -169,3 +169,64 @@ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE participants;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ─── lifeline_state / lifeline_contacts (R10) ───────────────
+-- Round 2 lifelines. Kept here so a fresh setup needs only this file;
+-- an existing database gets the same thing from migration_v7.sql, plus
+-- the audience poll's tally column from migration_v8.sql.
+CREATE TABLE IF NOT EXISTS lifeline_state (
+  round           INT  NOT NULL CHECK (round IN (1, 2)),
+  key             TEXT NOT NULL CHECK (key IN ('audience_poll', 'fifty_fifty', 'call_expert', 'phone_friend')),
+  status          TEXT NOT NULL DEFAULT 'available'
+                    CHECK (status IN ('available', 'active', 'used')),
+  -- The question this lifeline was played on: everything drawn from this
+  -- row is scoped to it, so nothing leaks onto the next question.
+  question_id     UUID REFERENCES questions(id) ON DELETE SET NULL,
+  removed_options JSONB,        -- fifty_fifty: the two 0-based indices struck
+  poll_votes      JSONB,        -- audience_poll: one raw vote count per option (R11)
+  poll_hidden_at  TIMESTAMPTZ,  -- audience_poll: when the host hid the chart again (R11)
+  picked_at       TIMESTAMPTZ,  -- the lifeline the host has picked for this question (R12)
+  started_at      TIMESTAMPTZ,  -- call_expert / phone_friend countdown anchor
+  duration_ms     INT CHECK (duration_ms IS NULL OR duration_ms > 0),
+  activated_at    TIMESTAMPTZ,
+  PRIMARY KEY (round, key)
+);
+
+INSERT INTO lifeline_state (round, key)
+VALUES (2, 'audience_poll'), (2, 'fifty_fifty'), (2, 'call_expert'), (2, 'phone_friend')
+ON CONFLICT (round, key) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS lifeline_contacts (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind        TEXT NOT NULL CHECK (kind IN ('expert', 'friend')),
+  name        TEXT NOT NULL,
+  detail      TEXT,
+  avatar_url  TEXT,
+  sort_order  INT  NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lifeline_contacts_kind ON lifeline_contacts (kind, sort_order);
+
+ALTER TABLE lifeline_state    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lifeline_contacts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Open access on lifeline_state" ON lifeline_state;
+CREATE POLICY "Open access on lifeline_state" ON lifeline_state
+  FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Open access on lifeline_contacts" ON lifeline_contacts;
+CREATE POLICY "Open access on lifeline_contacts" ON lifeline_contacts
+  FOR ALL USING (true) WITH CHECK (true);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE lifeline_state;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE lifeline_contacts;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

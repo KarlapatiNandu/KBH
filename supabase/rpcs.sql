@@ -384,6 +384,11 @@ BEGIN
   GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
 
   IF v_rows_updated > 0 THEN
+    -- Moving on closes any lifeline still open on the question we left. (R10)
+    UPDATE lifeline_state
+    SET status = 'used', started_at = NULL
+    WHERE round = p_round AND status = 'active';
+
     RETURN jsonb_build_object(
       'success', true,
       'action', 'advanced',
@@ -440,6 +445,13 @@ BEGIN
   WHERE round = p_round;
 
   GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+
+  -- A lifeline belongs to the question it was played on. Serving the next
+  -- one (or re-serving this one) closes it out rather than leaving it
+  -- 'active' forever, which would block every later activation. (R10)
+  UPDATE lifeline_state
+  SET status = 'used', started_at = NULL
+  WHERE round = p_round AND status = 'active';
 
   IF v_rows_updated = 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Round not found');
@@ -558,6 +570,19 @@ BEGIN
   IF v_rows_updated = 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Round not found');
   END IF;
+
+  -- Lifelines are once per run-through, so a round that is being made
+  -- re-runnable has to hand all four back too. (R10)
+  UPDATE lifeline_state
+  SET status          = 'available',
+      question_id     = NULL,
+      removed_options = NULL,
+      poll_votes      = NULL,
+      poll_hidden_at  = NULL,
+      picked_at       = NULL,
+      started_at      = NULL,
+      activated_at    = NULL
+  WHERE round = p_round;
 
   RETURN jsonb_build_object(
     'success', true,
@@ -727,5 +752,474 @@ BEGIN
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 
   RETURN jsonb_build_object('success', true, 'round', p_round, 'renumbered', v_updated);
+END;
+$$;
+
+
+-- ============================================================
+-- R10 — Round 2 lifelines
+--
+-- Four lifelines, one shot each, all driven by the host from the admin
+-- console. Every one of them is scoped to the question it was played on
+-- (lifeline_state.question_id), so nothing a lifeline does can leak onto
+-- the next question the host serves.
+--
+-- Only one lifeline may be `active` at a time — that is how the show
+-- runs, and it keeps the contestant's screen unambiguous about which
+-- overlay it is meant to be drawing.
+-- ============================================================
+
+-- ─── live_round2_question (internal) ────────────────────────
+-- The question currently on the board for round 2, resolved by
+-- order_index exactly as host_submit_answer / host_reveal_answer do.
+CREATE OR REPLACE FUNCTION live_round2_question()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+  SELECT q.id
+  FROM round_state rs
+  JOIN questions q
+    ON q.round = 2 AND q.order_index = rs.current_question_index
+  WHERE rs.round = 2 AND rs.status = 'active'
+  LIMIT 1;
+$$;
+
+
+-- ─── activate_lifeline ──────────────────────────────────────
+-- Puts a lifeline on the contestant's screen.
+--
+--   audience_poll — the room votes and the host tallies it into
+--     set_poll_votes; ending the poll publishes the bar chart on the
+--     contestant's board. (R11)
+--   call_expert / phone_friend — freezes the question countdown and
+--     starts a replacement one of p_duration_ms (default 30s) in its own
+--     colour, alongside the phone and its contact list.
+--
+-- fifty_fifty does not come through here: the host picks the two options
+-- to strike, which is set_fifty_fifty below.
+CREATE OR REPLACE FUNCTION activate_lifeline(
+  p_key         TEXT,
+  p_duration_ms INT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_lifeline    RECORD;
+  v_question_id UUID;
+  v_busy        TEXT;
+BEGIN
+  IF p_key = 'fifty_fifty' THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', '50:50 is played by choosing which two options to strike'
+    );
+  END IF;
+
+  SELECT * INTO v_lifeline FROM lifeline_state WHERE round = 2 AND key = p_key;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unknown lifeline');
+  END IF;
+
+  IF v_lifeline.status = 'used' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'That lifeline has already been used');
+  END IF;
+
+  IF v_lifeline.status = 'active' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'That lifeline is already running');
+  END IF;
+
+  -- One at a time. Naming the offender saves the host a hunt.
+  SELECT key INTO v_busy FROM lifeline_state
+  WHERE round = 2 AND status = 'active' LIMIT 1;
+
+  IF v_busy IS NOT NULL THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', format('%s is still running — end it first', v_busy)
+    );
+  END IF;
+
+  v_question_id := live_round2_question();
+  IF v_question_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No live question');
+  END IF;
+
+  -- R12 — the board has one medallion, and playing a lifeline takes it.
+  -- Anything the host had only marked comes off the rail here: starting
+  -- the Audience Poll, which is never picked itself, is what puts out a
+  -- 50:50 or a call the contestant named a moment earlier.
+  UPDATE lifeline_state SET picked_at = NULL WHERE round = 2 AND key <> p_key;
+
+  UPDATE lifeline_state
+  SET status       = 'active',
+      question_id  = v_question_id,
+      activated_at = now(),
+      -- Only the phone lifelines run a countdown; the poll has none.
+      started_at   = CASE WHEN p_key IN ('call_expert', 'phone_friend') THEN now() END,
+      duration_ms  = CASE WHEN p_key IN ('call_expert', 'phone_friend')
+                          THEN COALESCE(p_duration_ms, duration_ms, 30000) END,
+      -- A new poll starts on an empty tally and an unhidden board, so
+      -- re-playing it can never put the previous question's chart straight
+      -- back up, nor start out already closed. (R11)
+      poll_votes     = NULL,
+      poll_hidden_at = NULL
+  WHERE round = 2 AND key = p_key;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'key', p_key,
+    'question_id', v_question_id
+  );
+END;
+$$;
+
+
+-- ─── end_lifeline ───────────────────────────────────────────
+-- The host closes the lifeline down. For the phone lifelines the phone
+-- leaves the contestant's screen and the question countdown picks up from
+-- exactly where it froze; for the audience poll this is the moment the
+-- tally goes up as a bar chart, which is why the chart keys off `used`
+-- rather than `active` (R11). Spent either way — a lifeline is once per
+-- game.
+CREATE OR REPLACE FUNCTION end_lifeline(p_key TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_rows_updated INT;
+BEGIN
+  -- `status = 'active'`, not `status <> 'used'`: the looser test also matched
+  -- an untouched lifeline and burnt it, so a stray End on a lifeline that was
+  -- never played would have spent it outright.
+  UPDATE lifeline_state
+  SET status     = 'used',
+      started_at = NULL
+  WHERE round = 2 AND key = p_key AND status = 'active';
+
+  GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+
+  IF v_rows_updated = 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Nothing to end — that lifeline is not running');
+  END IF;
+
+  RETURN jsonb_build_object('success', true, 'key', p_key);
+END;
+$$;
+
+
+-- ─── pick_lifeline ──────────────────────────────────────────
+-- The contestant names a lifeline; the host marks it on the board.
+--
+-- This is only the announcement — nothing is played. The medallion comes
+-- up on the contestant's screen (the same badge the show parks on the
+-- crossing point of the option rows) and the host then runs the lifeline
+-- for real: set_fifty_fifty for the strike, activate_lifeline for a call.
+--
+-- Exactly one lifeline is picked at a time, because the board has exactly
+-- one medallion to give. Picking a second one on the same question — a
+-- 50:50 followed by a phone call is an ordinary pair — moves the badge
+-- rather than trying to show both.
+--
+-- p_key NULL clears the pick, for a host who marked the wrong one.
+--
+-- The Audience Poll is not pickable: activate_lifeline already puts it on
+-- screen the moment it is started, so a pick would be a second way to say
+-- the same thing.
+CREATE OR REPLACE FUNCTION pick_lifeline(p_key TEXT DEFAULT NULL)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_lifeline    RECORD;
+  v_question_id UUID;
+BEGIN
+  -- Clearing the pick: always allowed, and never an error. A host reaching
+  -- for this has already made one mistake and does not need a second.
+  IF p_key IS NULL THEN
+    UPDATE lifeline_state SET picked_at = NULL WHERE round = 2;
+    RETURN jsonb_build_object('success', true, 'key', NULL);
+  END IF;
+
+  IF p_key = 'audience_poll' THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'The Audience Poll is started, not picked'
+    );
+  END IF;
+
+  SELECT * INTO v_lifeline FROM lifeline_state WHERE round = 2 AND key = p_key;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unknown lifeline');
+  END IF;
+
+  IF v_lifeline.status = 'used' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'That lifeline has already been used');
+  END IF;
+
+  v_question_id := live_round2_question();
+  IF v_question_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No live question');
+  END IF;
+
+  -- One medallion, one pick.
+  UPDATE lifeline_state SET picked_at = NULL WHERE round = 2 AND key <> p_key;
+
+  -- question_id is what scopes the medallion to the question it was picked
+  -- on, exactly as it scopes everything else a lifeline draws.
+  UPDATE lifeline_state
+  SET picked_at   = now(),
+      question_id = v_question_id
+  WHERE round = 2 AND key = p_key;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'key', p_key,
+    'question_id', v_question_id
+  );
+END;
+$$;
+
+
+-- ─── set_fifty_fifty ────────────────────────────────────────
+-- The host strikes two options off the live question by hand. (There is
+-- no automatic pick: on the show the two that go are chosen for the
+-- moment, not by a rule.)
+--
+-- Refuses to strike the correct answer — a 50:50 that removes the right
+-- option is unrecoverable once it is on the contestant's screen, and the
+-- host is picking these under time pressure.
+CREATE OR REPLACE FUNCTION set_fifty_fifty(
+  p_option_a INT,
+  p_option_b INT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_lifeline    RECORD;
+  v_question    RECORD;
+  v_question_id UUID;
+  v_option_count INT;
+BEGIN
+  SELECT * INTO v_lifeline FROM lifeline_state WHERE round = 2 AND key = 'fifty_fifty';
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unknown lifeline');
+  END IF;
+
+  IF v_lifeline.status = 'used' THEN
+    RETURN jsonb_build_object('success', false, 'error', '50:50 has already been used');
+  END IF;
+
+  v_question_id := live_round2_question();
+  IF v_question_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No live question');
+  END IF;
+
+  SELECT * INTO v_question FROM questions WHERE id = v_question_id;
+  v_option_count := jsonb_array_length(v_question.options);
+
+  IF p_option_a IS NULL OR p_option_b IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Pick two options to strike');
+  END IF;
+
+  IF p_option_a = p_option_b THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Pick two different options');
+  END IF;
+
+  IF p_option_a < 0 OR p_option_a >= v_option_count
+     OR p_option_b < 0 OR p_option_b >= v_option_count THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Option out of range for this question');
+  END IF;
+
+  IF p_option_a = v_question.correct_option OR p_option_b = v_question.correct_option THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', '50:50 cannot strike the correct answer'
+    );
+  END IF;
+
+  UPDATE lifeline_state
+  SET status          = 'used',
+      question_id     = v_question_id,
+      activated_at    = now(),
+      removed_options = jsonb_build_array(p_option_a, p_option_b)
+  WHERE round = 2 AND key = 'fifty_fifty';
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'key', 'fifty_fifty',
+    'question_id', v_question_id,
+    'removed_options', jsonb_build_array(p_option_a, p_option_b)
+  );
+END;
+$$;
+
+
+-- ─── set_poll_votes ─────────────────────────────────────────
+-- The host types the room's tally into the console while the poll is on
+-- screen, one count per option in option order. Ending the poll
+-- (end_lifeline) is what publishes it as the bar chart, so the numbers
+-- can be corrected right up to that moment — and afterwards too, because
+-- a miscount spotted on air should be fixable without taking the chart
+-- down and playing the lifeline again.
+--
+-- Raw counts, not percentages: the chart does the arithmetic, so fixing
+-- one option does not mean redoing all four.
+CREATE OR REPLACE FUNCTION set_poll_votes(p_votes JSONB)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_lifeline     RECORD;
+  v_question     RECORD;
+  v_question_id  UUID;
+  v_option_count INT;
+  v_vote         JSONB;
+BEGIN
+  SELECT * INTO v_lifeline FROM lifeline_state WHERE round = 2 AND key = 'audience_poll';
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Unknown lifeline');
+  END IF;
+
+  IF v_lifeline.status = 'available' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Start the poll before entering votes');
+  END IF;
+
+  v_question_id := live_round2_question();
+  IF v_question_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No live question');
+  END IF;
+
+  -- The tally belongs to the question the poll was played on. Without this
+  -- a late correction would re-point a spent poll at whatever is on the
+  -- board now, and the chart would surface on a question nobody polled.
+  IF v_lifeline.question_id IS DISTINCT FROM v_question_id THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'That poll was played on another question'
+    );
+  END IF;
+
+  IF p_votes IS NULL OR jsonb_typeof(p_votes) <> 'array' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Votes must be a list of numbers');
+  END IF;
+
+  SELECT * INTO v_question FROM questions WHERE id = v_question_id;
+  v_option_count := jsonb_array_length(v_question.options);
+
+  IF jsonb_array_length(p_votes) <> v_option_count THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', format('This question has %s options - enter a count for each', v_option_count)
+    );
+  END IF;
+
+  FOR v_vote IN SELECT value FROM jsonb_array_elements(p_votes) LOOP
+    IF jsonb_typeof(v_vote) <> 'number' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Vote counts must be numbers');
+    END IF;
+    IF (v_vote #>> '{}')::numeric < 0 THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Vote counts must be zero or more');
+    END IF;
+  END LOOP;
+
+  UPDATE lifeline_state
+  SET poll_votes = p_votes
+  WHERE round = 2 AND key = 'audience_poll';
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'key', 'audience_poll',
+    'question_id', v_question_id,
+    'poll_votes', p_votes
+  );
+END;
+$$;
+
+
+-- ─── hide_poll_result ───────────────────────────────────────
+-- The host takes the chart back off the contestant's board.
+--
+-- This is the other half of ending the poll. The poll holds the question
+-- clock from the moment it goes live — the contestant cannot be expected
+-- to think while the room's answer is sitting on their screen — and this
+-- is what releases it: the chart goes, and the countdown picks up from
+-- exactly where it froze, the same way it does when a call ends.
+--
+-- Hiding is not scoped to the live question. A chart only ever draws on
+-- the question it was played on, so hiding a stale one changes nothing on
+-- screen, but the host should never be left holding a button that refuses.
+CREATE OR REPLACE FUNCTION hide_poll_result()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_rows_updated INT;
+BEGIN
+  UPDATE lifeline_state
+  SET poll_hidden_at = now()
+  WHERE round = 2
+    AND key = 'audience_poll'
+    AND status = 'used'
+    AND poll_votes IS NOT NULL
+    AND poll_hidden_at IS NULL;
+
+  GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+
+  IF v_rows_updated = 0 THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Nothing to hide — the poll result is not on screen'
+    );
+  END IF;
+
+  RETURN jsonb_build_object('success', true, 'key', 'audience_poll');
+END;
+$$;
+
+
+-- ─── reset_lifelines ────────────────────────────────────────
+-- Hands all four back for another run-through. Called by reset_round, and
+-- exposed on its own so the host can undo a misfire without wiping the
+-- round's answers with it.
+CREATE OR REPLACE FUNCTION reset_lifelines(p_round INT DEFAULT 2)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_rows_updated INT;
+BEGIN
+  UPDATE lifeline_state
+  SET status          = 'available',
+      question_id     = NULL,
+      removed_options = NULL,
+      poll_votes      = NULL,
+      poll_hidden_at  = NULL,
+      picked_at       = NULL,
+      started_at      = NULL,
+      activated_at    = NULL
+  WHERE round = p_round;
+
+  GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+
+  RETURN jsonb_build_object('success', true, 'round', p_round, 'reset', v_rows_updated);
 END;
 $$;

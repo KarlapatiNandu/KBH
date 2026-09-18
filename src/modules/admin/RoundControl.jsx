@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import QuestionConsole from './QuestionConsole';
 import HotSeatAnswerPanel from './HotSeatAnswerPanel';
+import LifelinePanel from './LifelinePanel';
 
 /**
  * Module 2 — Round Control
@@ -15,6 +16,8 @@ import HotSeatAnswerPanel from './HotSeatAnswerPanel';
  *
  * Round 2 answers are locked in by the host from here, not by the
  * contestant — see HotSeatAnswerPanel. (R7)
+ *
+ * Round 2's four lifelines are played from here too — see LifelinePanel. (R10)
  */
 
 export default function RoundControl() {
@@ -334,6 +337,12 @@ export default function RoundControl() {
               roundState={round2}
               questions={questions[2]}
               hotSeat={hotSeat}
+              onResult={showToast}
+            />
+
+            <LifelinePanel
+              roundState={round2}
+              questions={questions[2]}
               onResult={showToast}
             />
 

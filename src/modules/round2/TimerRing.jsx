@@ -18,7 +18,27 @@ import { useState, useEffect, useRef, useId } from 'react';
  * paused is accumulated and subtracted from the elapsed clock, so the host
  * locking an answer in mid-question holds the numeral where it stood and a
  * resume picks up from there instead of jumping to wall-clock time.
+ *
+ * R10 — `palette` switches the dome's colours. The hot seat's own clock runs
+ * gold-and-amber; the replacement clock that a phone lifeline starts runs
+ * silver-and-cyan, so at a glance nobody can mistake the 30 seconds of a
+ * phone call for the question's own countdown.
  */
+
+// Two colour schemes for the same dome: the question's clock, and the one a
+// phone lifeline puts in its place. `ramp` runs full → nearly out.
+const PALETTES = {
+  hotseat: {
+    rim: ['#F7E7A0', '#F2B705', '#A9822F'],
+    face: ['#1d2f7d', '#12205e', '#070f33'],
+    ramp: ['#E8871E', '#F57C00', '#E5484D'],
+  },
+  lifeline: {
+    rim: ['#DCEEF7', '#7FD4EE', '#2E6E8E'],
+    face: ['#0d3a4f', '#0a2b3d', '#04151f'],
+    ramp: ['#35C6E8', '#2E9BD4', '#E5484D'],
+  },
+};
 
 // Dome geometry, in the 120x58 viewBox below. The coin's centre sits on the
 // flat edge, at the very bottom of the box, so only the top half of each
@@ -40,6 +60,7 @@ export default function TimerRing({
   durationMs = 10000,
   onTimeUp,
   isPaused = false,
+  palette = 'hotseat',
 }) {
   const [remainingMs, setRemainingMs] = useState(durationMs);
   const rafRef = useRef(null);
@@ -108,30 +129,33 @@ export default function TimerRing({
   const dashOffset = RING_ARC_LENGTH * (1 - fraction);
   const seconds = Math.ceil(remainingMs / 1000);
 
-  // Hot seat runs amber rather than gold, then deepens to red
+  const colours = PALETTES[palette] || PALETTES.hotseat;
+
+  // Hot seat runs amber rather than gold, then deepens to red; a lifeline's
+  // clock runs the cyan ramp instead. (R10)
   const getTimerColor = () => {
-    if (fraction > 0.5) return '#E8871E';
-    if (fraction > 0.25) return '#F57C00';
-    return '#E5484D';
+    if (fraction > 0.5) return colours.ramp[0];
+    if (fraction > 0.25) return colours.ramp[1];
+    return colours.ramp[2];
   };
 
   const timerColor = getTimerColor();
   const isUrgent = fraction <= 0.25;
 
   return (
-    <div className="timer-card timer-card--dome">
+    <div className={`timer-card timer-card--dome timer-card--${palette}`}>
       <div className="timer-ring-wrap timer-ring-wrap--dome">
         <svg viewBox="0 0 120 58" aria-hidden="true">
           <defs>
             <linearGradient id={`${gradId}-rim`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#F7E7A0" />
-              <stop offset="50%" stopColor="#F2B705" />
-              <stop offset="100%" stopColor="#A9822F" />
+              <stop offset="0%" stopColor={colours.rim[0]} />
+              <stop offset="50%" stopColor={colours.rim[1]} />
+              <stop offset="100%" stopColor={colours.rim[2]} />
             </linearGradient>
             <radialGradient id={`${gradId}-face`} cx="50%" cy="8%" r="105%">
-              <stop offset="0%" stopColor="#1d2f7d" />
-              <stop offset="60%" stopColor="#12205e" />
-              <stop offset="100%" stopColor="#070f33" />
+              <stop offset="0%" stopColor={colours.face[0]} />
+              <stop offset="60%" stopColor={colours.face[1]} />
+              <stop offset="100%" stopColor={colours.face[2]} />
             </radialGradient>
           </defs>
 

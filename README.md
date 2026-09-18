@@ -68,6 +68,84 @@ their screen when the host clicks **Reveal answer** in the hot seat panel
 (`host_reveal_answer` stamps `responses.revealed_at`). The timer running out no
 longer reveals anything by itself.
 
+**Upgrading to Round 2 lifelines (R10):** run `supabase/migration_v7.sql`, then
+re-run `supabase/rpcs.sql`. Adds the four lifelines — Audience Poll, 50:50,
+Call an Expert, Phone a Friend — played by the host from the **Lifelines**
+panel in Round Control, and mirrored onto the contestant's screen:
+
+- **Audience Poll** — the room votes and the host counts it in (see R11
+  below).
+- **50:50** — the host ticks which two wrong options to strike; those two
+  option bars are emptied on the contestant's screen for that question. The
+  RPC refuses to strike the correct answer.
+- **Call an Expert / Phone a Friend** — freezes the question countdown, puts
+  the phone up with its contact list, and runs a separate countdown in its own
+  colour. The contact lists live in `lifeline_contacts` and are editable from
+  the same panel mid-call; edits reach the contestant's screen live.
+
+Each lifeline is once per run-through. `reset_round` hands all four back, and
+there is a **Reset all** button on the panel for undoing a misfire on its own.
+
+**Upgrading to the Audience Poll result (R11):** run `supabase/migration_v8.sql`,
+then re-run `supabase/rpcs.sql`. The Audience Poll is no longer an indicator
+only. Starting it puts the LIVE banner up while the room votes; the host types
+the tally into the **Lifelines** panel, one count per option, and **End poll &
+show result** publishes it as the bar chart in the top-right of the
+contestant's board (`assets and references/Audience_pole_Display.png`).
+
+The poll holds the question clock the way a call does — nobody can be asked to
+think against a running countdown with the room's answer in front of them — so
+the chart stays up, and the clock stays frozen, until the host clicks **Hide &
+resume clock**. The countdown then picks up from exactly where it froze.
+
+- Counts go in, not percentages — the chart works out the split (and makes it
+  add up to 100), so one miscounted option can be fixed on its own.
+- The console previews the same percentages as you type, and **Update result**
+  corrects the chart while it is still on the board.
+- While the chart is up the poll's card stays lit and reads **ON SCREEN**, not
+  `USED`: it is still holding the contestant's clock.
+- Ending the poll with no tally entered is allowed: the banner goes, there is
+  no chart, and the clock resumes straight away.
+
+**Upgrading to picking a lifeline (R12):** run `supabase/migration_v9.sql`, then
+re-run `supabase/rpcs.sql`. Choosing a lifeline and playing it are two separate
+beats of the show, and **Pick** is the first one: the contestant names 50:50,
+the host picks it, and the medallion comes up on the crossing point of the
+option rows (`assets and references/Chosen_lifeline_display.png`) before a
+single option has been struck. The host then plays it as usual.
+
+- **Pick** is on 50:50, Call an Expert and Phone a Friend. The Audience Poll
+  has none — starting it is already the announcement.
+- One pick at a time: the board has one medallion, so picking a second moves
+  the badge. A contestant playing 50:50 and then a phone call just picks twice.
+- A picked lifeline reads **PICKED** on its card; tapping the pill again clears
+  the pick. A pick belongs to the question it was made on and goes with it.
+- A lifeline that is actually running still wins the medallion, so announcing
+  the next one mid-call cannot pull the badge off the call.
+
+**The pick stops the clock (R13):** no schema change and no migration — this is
+the contestant's screen reading the same rows differently. A contestant who has
+said "50:50" has stopped thinking about the question and started waiting on the
+host, who still has to read two options off the console or dial a number.
+Running the countdown through that charges them for the host's setup time, so
+the pick freezes it and the lifeline finishing starts it again:
+
+- **50:50** — the strike is what hands the clock back. Two bars go empty, there
+  is something new to think about, and the countdown picks up where it froze.
+- **Call an Expert / Phone a Friend** — the call's *own* clock ending is what
+  hands it back, not the host pressing End. The phone comes down at the same
+  moment, because a countdown running behind a handset the contestant cannot
+  read the question through is time they cannot use. **End call** is now for
+  hanging up early, and for handing the lifeline row back afterwards.
+- **Audience Poll** — unchanged, and not part of this: it is never picked, and
+  it already holds the clock from going live until the chart is hidden (R11).
+
+The contestant's board says which it is. A lifeline that is running reads
+**● LIVE**; one the host has only picked reads **● PICKED** with *your clock is
+paused* — a frozen countdown with nothing on screen to explain it reads as a
+fault. A call whose time has run out while the host has not yet ended the row
+reads **● TIME UP**, and says the clock is running again, because it is.
+
 ### 3. Admin account
 
 The admin is a single Supabase Auth user. Create it once in the dashboard —
