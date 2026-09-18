@@ -62,6 +62,14 @@ import { lifelineLabel } from './lifelines';
  * hides it from the console, which is also what restarts the countdown.
  *
  *   pollVotes          — raw vote counts per option, or null for no chart
+ *
+ * R14 — the prize bar says what this one question is worth; the ladder
+ * behind it says what the run is worth. `onOpenLadder` puts a button
+ * beside the prize that opens it (Round2Engine owns the panel itself), and
+ * is null when the host has not set a ladder — no button for a panel with
+ * nothing in it.
+ *
+ *   onOpenLadder       — open the prize ladder, or null for no button
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
@@ -84,6 +92,7 @@ export default function QuestionCard({
   lifelineHolding = false,
   removedOptions = [],
   pollVotes = null,
+  onOpenLadder = null,
 }) {
   // The lock-in shows immediately; the verdict waits for the reveal.
   const showVerdict = revealed && lastResult !== null;
@@ -150,9 +159,33 @@ export default function QuestionCard({
 
       {/* Prize for this question (R8) — the gold money bar with its rupee
           coin, as it sits above the question on the show
-          (assets and references/question_styling2.png) */}
-      {question.prize && (
+          (assets and references/question_styling2.png)
+
+          R14 — and the way into the whole ladder, on the same line: what
+          this question pays and what the climb pays are the same thought,
+          and the contestant reaches for the second one from the first. */}
+      {(question.prize || onOpenLadder) && (
         <div className="r2-prize-row">
+          {onOpenLadder && (
+            <button
+              type="button"
+              className="r2-ladder-btn"
+              onClick={onOpenLadder}
+              title="See the whole prize ladder and the lifelines you have left"
+            >
+              <svg className="r2-ladder-btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  d="M2 3.5h12M2 8h12M2 12.5h12"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Prize ladder
+            </button>
+          )}
+
+          {question.prize && (
           <div className="r2-prize">
             <div className="r2-hex r2-hex--prize">
               <span className="r2-hex-inner">
@@ -190,6 +223,7 @@ export default function QuestionCard({
               </svg>
             </span>
           </div>
+          )}
         </div>
       )}
 
@@ -388,17 +422,57 @@ export default function QuestionCard({
            above the question exactly as it does on the show. */
         .r2-prize-row {
           display: flex;
+          align-items: center;
           justify-content: flex-end;
+          gap: var(--space-sm);
           padding: 0 var(--space-md);
           margin: calc(-1 * var(--space-sm)) 0 var(--space-md);
-          transition: opacity 0.5s ease;
+        }
+
+        /* ── Prize ladder (R14) ──────────────────────────────── */
+        /* The way into the ladder, parked at the far end of the prize
+           line. Quiet on purpose: it is a thing to reach for between
+           questions, and it must not pull the eye away from the money bar
+           it sits next to. */
+        .r2-ladder-btn {
+          margin-right: auto;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          border-radius: var(--radius-pill);
+          border: 1px solid rgba(242,183,5,0.35);
+          background: rgba(11,20,64,0.55);
+          color: var(--pale-gold);
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+        }
+
+        .r2-ladder-btn:hover {
+          border-color: var(--spotlight-gold);
+          background: rgba(242,183,5,0.12);
+          color: var(--spotlight-gold);
+        }
+
+        .r2-ladder-btn-icon {
+          width: 14px;
+          height: 14px;
+          flex-shrink: 0;
         }
 
         /* The poll chart takes this corner for as long as it is up. The
            prize does not move — the board must not reflow mid-question —
            it just steps back, and comes forward again with the next
            question. (R11) */
-        .r2-qc-card--poll .r2-prize-row {
+        /* R14 — the money bar, not the whole row: the ladder button is at
+           the other end of that line and nowhere near the chart's corner,
+           so it keeps its weight. The clock is paused while the chart is
+           up, which is exactly when a contestant opens the ladder to work
+           out whether to walk. */
+        .r2-qc-card--poll .r2-prize {
           opacity: 0.18;
         }
 
@@ -406,7 +480,7 @@ export default function QuestionCard({
            corner (see AudiencePoll's own breakpoint, deliberately the same
            number), so nothing is over the prize and it keeps its weight. */
         @media (max-width: 720px) {
-          .r2-qc-card--poll .r2-prize-row { opacity: 1; }
+          .r2-qc-card--poll .r2-prize { opacity: 1; }
         }
 
         .r2-prize {
@@ -414,6 +488,7 @@ export default function QuestionCard({
           display: flex;
           align-items: center;
           padding-right: 28px;
+          transition: opacity 0.5s ease;
         }
 
         .r2-hex--prize {

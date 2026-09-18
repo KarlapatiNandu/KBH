@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import QuestionCard from './QuestionCard';
 import Round2Results from './Round2Results';
 import PhoneOverlay from './PhoneOverlay';
+import PrizeLadder from './PrizeLadder';
 import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './lifelines';
 
 /**
@@ -85,6 +86,13 @@ export default function Round2Engine({ participant }) {
   // response poll uses above.
   const lifelineSigRef = useRef(undefined);
   const contactSigRef = useRef(undefined);
+
+  // R14 — the prize ladder, and whether the contestant currently has it
+  // open over the board. Empty on a database without migration_v10, which
+  // keeps the button off their screen rather than offering an empty panel.
+  const [ladder, setLadder] = useState([]);
+  const [ladderOpen, setLadderOpen] = useState(false);
+  const ladderSigRef = useRef(undefined);
 
   // R6 - client-side timing. `questionAnchor` is the local wall-clock moment
   // this client actually rendered the live question; both the countdown and
@@ -217,12 +225,43 @@ export default function Round2Engine({ participant }) {
     setContacts(rows);
   }, []);
 
+  // R14 — the prize ladder. Re-read rather than patched from the payload,
+  // same as the lifelines: the host may re-price a rung or add one
+  // mid-show, and the ladder is short enough that re-reading it is cheaper
+  // than reasoning about which event changed what.
+  const syncLadder = useCallback(async () => {
+    const { data, error: fetchError } = await supabase
+      .from('prize_ladder')
+      .select('*')
+      .eq('round', 2)
+      .order('level');
+
+    // A database without migration_v10 errors here every time. Leave the
+    // ladder empty and say nothing — the host's console flags it.
+    if (fetchError) return;
+
+    const rows = data || [];
+    const sig = rows.map((r) => `${r.id}:${r.level}:${r.label}:${r.is_milestone}`).join('|');
+    if (sig === ladderSigRef.current) return;
+    ladderSigRef.current = sig;
+
+    setLadder(rows);
+  }, []);
+
   useEffect(() => {
     syncLifelines();
     syncContacts();
+    syncLadder();
 
     const channel = supabase
       .channel('round2-engine-lifelines')
+      // A rung re-priced mid-show lands on the contestant's open ladder
+      // without them closing and reopening it. (R14)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'prize_ladder' },
+        () => syncLadder()
+      )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'lifeline_state' },
@@ -240,7 +279,7 @@ export default function Round2Engine({ participant }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [syncLifelines, syncContacts]);
+  }, [syncLifelines, syncContacts, syncLadder]);
 
   // Polling fallback, for the same reason the lock-in has one: realtime to a
   // phone on venue wifi is not something to bet a lifeline on.
@@ -385,6 +424,10 @@ export default function Round2Engine({ participant }) {
     setHasAnswered(false);
     setRevealed(false);
     setGamePhase('active');
+    // R14 — a new serve puts the board back. The countdown starts on this
+    // beat, and a ladder left open over the question is time the
+    // contestant cannot use.
+    setLadderOpen(false);
 
     // A response may already exist - page reload, or a re-serve that did not
     // clear responses. Reflect it so the verdict survives a refresh.
@@ -743,6 +786,9 @@ export default function Round2Engine({ participant }) {
                 lifelineHolding={pickHolding || pollHolding}
                 removedOptions={removedOptions}
                 pollVotes={pollVotes}
+                // R14 — no ladder set, no button: an empty panel is worse
+                // than no way to open one.
+                onOpenLadder={ladder.length > 0 ? () => setLadderOpen(true) : null}
               />
             ) : (
               <div className="r2-center">
@@ -774,6 +820,23 @@ export default function Round2Engine({ participant }) {
             startedAtMs={lifelineAnchor}
             durationMs={phoneLifeline.duration_ms || DEFAULT_LIFELINE_DURATION_MS}
             onTimeUp={() => setCallTimeUp(true)}
+          />
+        )}
+
+        {/* R14 — the money tree, when the contestant asks for it. It sits
+            under the phone deliberately: a call is the one thing on this
+            screen with a clock of its own running, and the ladder must not
+            be able to cover it. */}
+        {ladderOpen && ladder.length > 0 && (
+          <PrizeLadder
+            rungs={ladder}
+            // Question N of the run is played for rung N — the same
+            // position the board counts in "Question 3 of 6", so a host
+            // serving out of order does not move the contestant down the
+            // ladder.
+            currentLevel={currentQuestionNumber || null}
+            lifelineStatuses={lifelinesLoaded ? lifelineStatuses : null}
+            onClose={() => setLadderOpen(false)}
           />
         )}
 

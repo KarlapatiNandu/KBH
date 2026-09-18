@@ -146,6 +146,43 @@ paused* — a frozen countdown with nothing on screen to explain it reads as a
 fault. A call whose time has run out while the host has not yet ended the row
 reads **● TIME UP**, and says the clock is running again, because it is.
 
+**Upgrading to the prize ladder (R14):** run `supabase/migration_v10.sql`. No
+RPC change. Adds the money tree from the show (`assets and references/
+Price_list_display.png`) — every rung of the run, cheapest at the bottom, with
+the small set of lifelines above it.
+
+The contestant opens it from **Prize ladder**, on the same line as the prize
+bar, and it slides in over the board. Three things are marked on it and nothing
+else: the rung being played (gold and filled), the rungs already climbed (gold
+text), and the guaranteed rungs (white, ✦). The lifelines at its head are the
+same medallions as the rail under the question and carry the same four states,
+so a contestant weighing whether to walk can see the money left and the
+lifelines left in one glance. A new question puts the board back — the
+countdown starts on that beat, and a panel left open over the question is time
+they cannot use.
+
+The host sets it up in the **Prize ladder** panel in Round Control, which —
+unlike the Lifelines panel — is open whether or not the round is live, because
+the ladder is drawn up before the show:
+
+- **Stages** is how many rungs the run has. Raising it adds blank rungs on top
+  of the ladder to be priced; lowering it takes them off the top, which is the
+  end a shortened ladder loses. Unpriced rungs are counted on the panel header
+  so none reaches the contestant's screen blank.
+- Each rung's price is free text, exactly like a question's prize — `₹10,000`
+  and `7 Crore` are both fine. Saved on blur, and it reaches an already-open
+  ladder through realtime.
+- **✦** marks a guaranteed rung.
+- Removing a rung from the middle closes the gap behind it: `level` is the
+  rung's position in the climb, and question N of the round is played for rung
+  N, so the ladder is renumbered rather than left with a hole in it.
+
+The ladder is its own table rather than a read of `questions.prize`: the host
+sets how long the run is and what it pays independently of the question list,
+and a rung exists whether or not a question has been written for it yet. The
+per-question **Prize** field is unchanged and still drives the money bar on the
+board.
+
 ### 3. Admin account
 
 The admin is a single Supabase Auth user. Create it once in the dashboard —
@@ -195,6 +232,10 @@ npm run lint     # oxlint
    admin Participants list, so the host knows who is on a shaky connection.
 3. Round 1 waits on the host, then serves questions with a per-question
    countdown.
+4. In the Round 2 hot seat, **Prize ladder** (next to the prize bar) opens the
+   money tree: what every rung of the run pays, which one is being played, and
+   which lifelines are still in hand. It closes itself when the host serves the
+   next question.
 
 ### Host
 
@@ -218,6 +259,8 @@ Sign in at `/` on the **Admin** tab (or `/admin/login`).
     answered, so you can replay it.
   - **Reset & clear responses** makes a round re-runnable — without clearing,
     participants stay locked out of questions they have already answered.
+  - **Prize ladder** — how many rungs the Round 2 run has, what each pays, and
+    which are guaranteed. Open whether or not the round is live.
 
 ---
 

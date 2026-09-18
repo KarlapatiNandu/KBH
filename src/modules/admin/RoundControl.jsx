@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import QuestionConsole from './QuestionConsole';
 import HotSeatAnswerPanel from './HotSeatAnswerPanel';
 import LifelinePanel from './LifelinePanel';
+import PrizeLadderPanel from './PrizeLadderPanel';
 
 /**
  * Module 2 — Round Control
@@ -18,6 +19,10 @@ import LifelinePanel from './LifelinePanel';
  * contestant — see HotSeatAnswerPanel. (R7)
  *
  * Round 2's four lifelines are played from here too — see LifelinePanel. (R10)
+ *
+ * The prize ladder the contestant opens on their board is set up here as
+ * well — see PrizeLadderPanel. Unlike the lifelines it is not gated on the
+ * round being live: the ladder is drawn up before the show. (R14)
  */
 
 export default function RoundControl() {
@@ -345,6 +350,12 @@ export default function RoundControl() {
               questions={questions[2]}
               onResult={showToast}
             />
+
+            {/* R14 — how many rungs the run has and what each one pays.
+                Always available: the ladder is drawn up before the round
+                starts, and a rung re-priced mid-run should not need the
+                round ended to change it. */}
+            <PrizeLadderPanel round={2} onResult={showToast} />
 
             <QuestionConsole
               round={2}

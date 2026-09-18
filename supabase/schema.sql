@@ -230,3 +230,55 @@ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE lifeline_contacts;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ─── prize_ladder (R14) ─────────────────────────────────────
+-- The money tree from the show (assets and references/
+-- Price_list_display.png). Kept here so a fresh setup needs only this
+-- file; an existing database gets the same thing from migration_v10.sql.
+--
+-- Its own table rather than a read of `questions.prize`: the host sets how
+-- many rungs the run has and what each pays, independently of the question
+-- list, and a rung exists whether or not a question has been written for
+-- it yet. `level` counts up from 1 at the bottom and is what ties the
+-- ladder to the run — question N is played for level N.
+CREATE TABLE IF NOT EXISTS prize_ladder (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  round         INT  NOT NULL DEFAULT 2 CHECK (round IN (1, 2)),
+  level         INT  NOT NULL CHECK (level > 0),
+  label         TEXT NOT NULL,          -- free text, e.g. "₹10,000" or "7 Crore"
+  is_milestone  BOOLEAN NOT NULL DEFAULT false,  -- the white, guaranteed rung
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (round, level)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prize_ladder_round_level ON prize_ladder (round, level);
+
+-- A starting ladder, only while round 2 has none — re-running this file
+-- must not undo a host's edits or resurrect a rung they deleted.
+INSERT INTO prize_ladder (round, level, label, is_milestone)
+SELECT 2, v.level, v.label, v.is_milestone
+FROM (VALUES
+  (1,  '₹1,000',    false),
+  (2,  '₹2,000',    false),
+  (3,  '₹3,000',    false),
+  (4,  '₹5,000',    false),
+  (5,  '₹10,000',   true),
+  (6,  '₹20,000',   false),
+  (7,  '₹40,000',   false),
+  (8,  '₹80,000',   false),
+  (9,  '₹1,60,000', false),
+  (10, '₹3,20,000', true)
+) AS v(level, label, is_milestone)
+WHERE NOT EXISTS (SELECT 1 FROM prize_ladder p WHERE p.round = 2);
+
+ALTER TABLE prize_ladder ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Open access on prize_ladder" ON prize_ladder;
+CREATE POLICY "Open access on prize_ladder" ON prize_ladder
+  FOR ALL USING (true) WITH CHECK (true);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE prize_ladder;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
