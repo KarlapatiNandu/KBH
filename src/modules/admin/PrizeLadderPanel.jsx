@@ -114,12 +114,37 @@ export default function PrizeLadderPanel({ round = 2, onResult }) {
   };
 
   const toggleMilestone = async (rung) => {
+    const next = !rung.is_milestone;
+
+    // Flipped here first, before the write. The round trip to the database
+    // is a few hundred milliseconds and the host is pressing this in front
+    // of a room: a ✦ that only lights after the answer comes back reads as
+    // a press that missed, and the host presses it again — which toggles it
+    // straight back off. The row goes back if the write is refused.
+    setRungs((prev) =>
+      prev.map((r) => (r.id === rung.id ? { ...r, is_milestone: next } : r))
+    );
+
     const { error } = await supabase
       .from('prize_ladder')
-      .update({ is_milestone: !rung.is_milestone })
+      .update({ is_milestone: next })
       .eq('id', rung.id);
 
-    if (error) return fail('Could not change the guaranteed rung', error);
+    if (error) {
+      setRungs((prev) =>
+        prev.map((r) => (r.id === rung.id ? { ...r, is_milestone: !next } : r))
+      );
+      return fail('Could not change the guaranteed rung', error);
+    }
+
+    // Said out loud, unlike a re-priced rung: this is the one switch on the
+    // panel that decides what a contestant walks away with, and the host
+    // should not have to squint at a 26px button to know it took.
+    onResult(
+      next
+        ? `Rung ${rung.level} (${rung.label}) is guaranteed — a contestant who passes it keeps it`
+        : `Rung ${rung.level} (${rung.label}) is no longer guaranteed`
+    );
     fetchRungs();
   };
 
@@ -246,6 +271,10 @@ export default function PrizeLadderPanel({ round = 2, onResult }) {
   // ladder does.
   const ordered = [...rungs].sort((a, b) => b.level - a.level);
   const unpriced = rungs.filter((r) => r.label === UNSET_LABEL).length;
+  // Which rungs are guaranteed is worth reading off the closed header: a
+  // ladder with none of them pays every knocked-out contestant ₹0, and that
+  // is not something to discover during the show.
+  const guaranteed = rungs.filter((r) => r.is_milestone).length;
 
   if (!loaded) return null;
 
@@ -260,6 +289,9 @@ export default function PrizeLadderPanel({ round = 2, onResult }) {
         <span className="plp-label">Prize ladder</span>
         <span className="plp-count">
           {rungs.length} stage{rungs.length === 1 ? '' : 's'}
+        </span>
+        <span className={`plp-guard ${guaranteed === 0 ? 'plp-guard--none' : ''}`}>
+          {guaranteed === 0 ? 'no checkpoints' : `${guaranteed} ✦`}
         </span>
         {unpriced > 0 && <span className="plp-warn">{unpriced} unpriced</span>}
       </button>
@@ -318,10 +350,12 @@ export default function PrizeLadderPanel({ round = 2, onResult }) {
                   className={`plp-mile ${rung.is_milestone ? 'plp-mile--on' : ''}`}
                   onClick={() => toggleMilestone(rung)}
                   disabled={busy}
+                  aria-pressed={!!rung.is_milestone}
+                  aria-label={`Rung ${rung.level}: guaranteed`}
                   title={
                     rung.is_milestone
-                      ? 'Guaranteed rung — drawn in white on the contestant’s ladder. Tap to clear.'
-                      : 'Mark as a guaranteed rung'
+                      ? 'Guaranteed — a contestant who passes this rung keeps it however the rest of the run goes. Tap to clear.'
+                      : 'Mark as a guaranteed rung — the checkpoint a contestant falls back to'
                   }
                 >
                   ✦
@@ -344,7 +378,9 @@ export default function PrizeLadderPanel({ round = 2, onResult }) {
 
           <p className="plp-note">
             The contestant opens this from their board. Question N of the round is
-            played for rung N, and ✦ marks the guaranteed rungs.
+            played for rung N. ✦ is a checkpoint: pass it and that money is
+            theirs however the rest of the run goes — with none set, a wrong
+            answer pays ₹0.
           </p>
         </div>
       )}
@@ -409,10 +445,30 @@ function PrizeLadderPanelStyles() {
         font-weight: 600;
       }
 
+      /* How many checkpoints the ladder has, on the closed header. Gold
+         when there are some, plain when there are none — an empty ladder of
+         checkpoints is not an error the host should be shouted at about
+         before the show, but it is the difference between a knocked-out
+         contestant taking home money and taking home nothing. */
+      .plp-guard {
+        margin-left: auto;
+        padding: 1px 7px;
+        border-radius: var(--radius-pill);
+        background: rgba(247,231,160,0.18);
+        color: var(--champagne-gold);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      .plp-guard--none {
+        background: rgba(255,255,255,0.06);
+        color: rgba(232,217,160,0.6);
+      }
+
       /* A rung with no price on it is not a detail — it is a blank line on
          the contestant's ladder, so it is counted on the closed header. */
       .plp-warn {
-        margin-left: auto;
         padding: 1px 7px;
         border-radius: var(--radius-pill);
         background: rgba(232,135,30,0.16);
@@ -514,9 +570,20 @@ function PrizeLadderPanelStyles() {
         color: var(--antique-gold);
       }
 
-      /* White, the way the guaranteed rung reads on the contestant's
-         ladder — the two panels must agree at a glance. */
-      .plp-row--milestone .plp-level { color: var(--cloud-white); }
+      /* White and lit, the way the guaranteed rung reads on the
+         contestant's ladder — the two panels must agree at a glance, and
+         one white digit at 12px was not enough to carry that. */
+      .plp-row--milestone .plp-level {
+        color: var(--cloud-white);
+        text-shadow: 0 0 10px rgba(245,241,230,0.45);
+      }
+
+      .plp-row--milestone .plp-input {
+        border-color: rgba(247,231,160,0.5);
+        color: var(--cloud-white);
+        background:
+          linear-gradient(90deg, rgba(247,231,160,0.16) 0%, rgba(11,20,64,0.7) 55%);
+      }
 
       .plp-input {
         width: 100%;
@@ -550,12 +617,34 @@ function PrizeLadderPanelStyles() {
         font-size: 12px;
         line-height: 1;
         cursor: pointer;
+        transition:
+          background 0.15s ease,
+          color 0.15s ease,
+          border-color 0.15s ease,
+          box-shadow 0.15s ease;
       }
 
+      .plp-mile:hover:not(:disabled) {
+        border-color: rgba(242,183,5,0.55);
+        color: var(--pale-gold);
+      }
+
+      /* Filled, not tinted. On a 26px button a 16%-opacity wash and a
+         slightly brighter glyph is a difference the host cannot see from
+         where they are standing — a checkpoint that had been set still
+         looked unset, which is how it came to be pressed twice. Lit gold
+         with a dark ✦ is the same "this rung is on" the contestant's
+         ladder uses for the rung being played. */
       .plp-mile--on {
         border-color: var(--champagne-gold);
-        background: rgba(247,231,160,0.16);
-        color: var(--cloud-white);
+        background: linear-gradient(180deg, var(--champagne-gold) 0%, var(--spotlight-gold) 100%);
+        color: var(--deep-midnight);
+        box-shadow: 0 0 10px rgba(242,183,5,0.45);
+      }
+
+      .plp-mile--on:hover:not(:disabled) {
+        border-color: var(--champagne-gold);
+        color: var(--deep-midnight);
       }
 
       .plp-mini {

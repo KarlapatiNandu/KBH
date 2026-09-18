@@ -33,6 +33,13 @@ import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './l
  * tally they typed in as a bar chart. The poll freezes the question clock
  * too, from going live until the host hides the chart again (R11).
  *
+ * R15 — the reveal is also where the run can end. A wrong answer blacks the
+ * question out under a red price tag (QuestionCard), holds it there long
+ * enough for the room to read it, and then takes the contestant off the
+ * board to Round2Results: the hot seat is over for them, and what they take
+ * home is the last guaranteed checkpoint they passed. This device does not
+ * advance the round on the way out — the host moves the show on.
+ *
  * R12/R13 — a lifeline is picked before it is played, and the pick is what
  * stops the clock. From the moment the host marks the contestant's choice
  * the countdown is frozen; it starts again when that lifeline is genuinely
@@ -43,6 +50,16 @@ const TRANSITION_DELAY_MS = 2500; // Time between questions to show feedback
 const DEFAULT_DURATION_MS = 10000; // Fallback if round_state.question_duration_ms is unset
 const LOCK_POLL_MS = 1200;        // How often to look for the host's lock-in / reveal
 const CONTACT_POLL_MS = 3000;     // Refresh of the phone's contact list while a call is live
+// How often this device re-reads the round's own state. The lifeline and
+// response polls below only run while the round is active, so without this
+// a dropped realtime event on the host ending the round would leave a
+// contestant sitting on a dead board with the show already moved on. (R15)
+const ROUND_STATE_POLL_MS = 2500;
+// R15 — how long the blacked-out question and its red tag stay up before a
+// knocked-out contestant is taken to their results. Long enough to read the
+// number they just lost, short enough that they are not sitting on a dead
+// board while the host talks.
+const ELIMINATION_HOLD_MS = 4500;
 
 // Returned by checkExistingResponse when the request itself fell over, so a
 // dropped read is never mistaken for "the host cleared the answer". (R9: a
@@ -64,6 +81,12 @@ export default function Round2Engine({ participant }) {
   // held back until the host reveals it from the console. (R9)
   const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState(null);
+
+  // R15 — a wrong answer ends the run. `eliminated` is this device having
+  // let the reveal play out and moved on to the results screen; until it
+  // flips, the board is still showing the black question and the red tag.
+  const [eliminated, setEliminated] = useState(false);
+  const eliminationTimeoutRef = useRef(null);
 
   // R10 — the four lifeline rows, and the phone book the two call lifelines
   // dial from. `lifelinesLoaded` stays false on a database that has not run
@@ -111,8 +134,13 @@ export default function Round2Engine({ participant }) {
   // on every realtime tick.
   const roundStateRef = useRef(null);
   const questionsRef = useRef([]);
+  // The verdict, for settleQuestion — which has to know whether the reveal
+  // it is closing was a right answer or the end of the run, and must not
+  // re-subscribe every time one lands. (R15)
+  const lastResultRef = useRef(null);
   useEffect(() => { roundStateRef.current = roundState; }, [roundState]);
   useEffect(() => { questionsRef.current = questions; }, [questions]);
+  useEffect(() => { lastResultRef.current = lastResult; }, [lastResult]);
 
   // Load questions
   useEffect(() => {
@@ -149,21 +177,21 @@ export default function Round2Engine({ participant }) {
     return data;
   }, [participant.participant_id]);
 
+  const syncRoundState = useCallback(async () => {
+    const { data } = await supabase
+      .from('round_state')
+      .select('*')
+      .eq('round', 2)
+      .single();
+
+    if (data) {
+      setRoundState(data);
+    }
+  }, []);
+
   // Subscribe to round_state
   useEffect(() => {
-    async function fetchRoundState() {
-      const { data } = await supabase
-        .from('round_state')
-        .select('*')
-        .eq('round', 2)
-        .single();
-
-      if (data) {
-        setRoundState(data);
-      }
-    }
-
-    fetchRoundState();
+    syncRoundState();
 
     const channel = supabase
       .channel('round2-engine-state')
@@ -179,7 +207,19 @@ export default function Round2Engine({ participant }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [syncRoundState]);
+
+  // R15 — polling fallback for the round's own state, same reasoning as the
+  // lock-in poll below: realtime to a phone on venue wifi is not something
+  // to bet the end of a run on. It matters most for the host ending the
+  // round — that event is what takes this contestant to their results, and
+  // a missed one has nothing else to catch it. Stops once the round is
+  // over, which is the last state this device has any use for.
+  useEffect(() => {
+    if (roundState?.status === 'completed') return;
+    const id = setInterval(syncRoundState, ROUND_STATE_POLL_MS);
+    return () => clearInterval(id);
+  }, [roundState?.status, syncRoundState]);
 
   // R10 — lifeline state. Read whole rather than patched from the realtime
   // payload: there are four rows total, so a re-read is as cheap as parsing
@@ -374,6 +414,10 @@ export default function Round2Engine({ participant }) {
 
   // ─── Derive game phase from round_state ──────────────────────
   useEffect(() => {
+    // R15 — their run is over; a fresh serve is for whoever is in the hot
+    // seat now, and must not pull this contestant off their results.
+    if (eliminated) return;
+
     if (!questionsLoaded || !roundState) {
       setGamePhase('loading');
       return;
@@ -385,6 +429,14 @@ export default function Round2Engine({ participant }) {
     }
 
     if (roundState.status === 'completed') {
+      // R15 — the host has ended the round, so this contestant's run is
+      // over wherever they had got to: the results screen leads with the
+      // last checkpoint they passed, exactly as it does for a knock-out.
+      // Whatever this device had in flight goes with the round — a pending
+      // auto-advance must not fire an RPC on a round that is finished, and
+      // a reveal's hold has nothing left to hold the board for.
+      clearTimeout(advanceTimeoutRef.current);
+      clearTimeout(eliminationTimeoutRef.current);
       setGamePhase('completed');
       return;
     }
@@ -446,13 +498,29 @@ export default function Round2Engine({ participant }) {
       // A reload mid-reveal must come back revealed, not replay the hold. (R9)
       setRevealed(!!existing.revealed_at);
     });
-  }, [roundState, questionsLoaded, questions, checkExistingResponse]);
+  }, [roundState, questionsLoaded, questions, checkExistingResponse, eliminated]);
 
   // Once the question is settled — the timer ran out on an unanswered
   // question, or the host revealed the verdict — hand the round on: hold for
   // the host in manual mode, otherwise run the transition and advance. (R5)
   const settleQuestion = useCallback(() => {
     if (!roundStateRef.current || roundStateRef.current.status !== 'active') return;
+
+    // R15 — a wrong answer is not a question to move on from, it is the end
+    // of the run. The board holds the blacked-out question and the red tag
+    // for a beat, then this contestant leaves for their results. Nothing
+    // here advances the round: the host does that when the hot seat is
+    // actually being handed over, and a knocked-out contestant's device
+    // must not move the show on behind their back.
+    if (lastResultRef.current && lastResultRef.current.is_correct === false) {
+      setGamePhase('eliminated');
+      clearTimeout(eliminationTimeoutRef.current);
+      eliminationTimeoutRef.current = setTimeout(
+        () => setEliminated(true),
+        ELIMINATION_HOLD_MS
+      );
+      return;
+    }
 
     if (roundStateRef.current.manual_mode) {
       setGamePhase('held');
@@ -489,13 +557,26 @@ export default function Round2Engine({ participant }) {
 
   // R9 — the host's reveal is what closes a question that was answered.
   useEffect(() => {
-    if (!revealed) return;
+    if (!revealed) {
+      // R15 — the host can take a reveal back (clear the answer and re-lock
+      // it). Everything that reveal set in motion walks back with it, the
+      // pending exit most of all: a contestant must never be shown out on a
+      // verdict that has been withdrawn.
+      clearTimeout(eliminationTimeoutRef.current);
+      setGamePhase((phase) => (phase === 'eliminated' ? 'active' : phase));
+      // And if they were already off the board, they come back to it. The
+      // only way this fires is the host clearing the answer on the question
+      // that is still live — which is them saying it was locked in wrong.
+      setEliminated(false);
+      return;
+    }
     settleQuestion();
   }, [revealed, settleQuestion]);
 
   // Cancel pending timers if we unmount first. (ISSUES 3.9)
   useEffect(() => () => {
     clearTimeout(advanceTimeoutRef.current);
+    clearTimeout(eliminationTimeoutRef.current);
   }, []);
 
   const handleBack = useCallback(() => {
@@ -511,6 +592,14 @@ export default function Round2Engine({ participant }) {
   const currentQuestionNumber = currentQuestion
     ? questions.findIndex((q) => q.id === currentQuestion.id) + 1
     : 0;
+
+  // R15 — the rung this question is played for, so the reveal has a number
+  // to put on the blacked-out board. Question N of the run is level N, the
+  // same position the ladder panel marks as "now". The question's own prize
+  // wins where it has one — that is what the bar above it has been showing
+  // all along.
+  const currentRung = ladder.find((r) => r.level === currentQuestionNumber) || null;
+  const currentPrizeLabel = currentQuestion?.prize || currentRung?.label || null;
 
   // Per-question time wins over the round default. (R8)
   const questionDurationMs =
@@ -682,6 +771,24 @@ export default function Round2Engine({ participant }) {
     );
   }
 
+  // R15 — knocked out. The reveal has had its beat on the board and this
+  // contestant's run is over: the results screen leads with the checkpoint
+  // they take home, not with the question that ended it.
+  if (eliminated) {
+    return (
+      <div className="r2-screen">
+        <Round2Results
+          participant={participant}
+          questions={questions}
+          ladder={ladder}
+          eliminated
+          onBack={handleBack}
+        />
+        <Round2Styles />
+      </div>
+    );
+  }
+
   // Loading
   if (gamePhase === 'loading') {
     return (
@@ -720,13 +827,20 @@ export default function Round2Engine({ participant }) {
     );
   }
 
-  // Completed
+  // Completed — the host ended the round. Same screen as a knock-out, and
+  // for the same reason: what the contestant takes home is the last
+  // guaranteed checkpoint they passed, whether the run ended on a wrong
+  // answer or the host called time on it. A verdict that was wrong still
+  // reads as the end of their run here — ending the round can cut the
+  // board's hold short, and it must not rewrite how the run finished. (R15)
   if (gamePhase === 'completed') {
     return (
       <div className="r2-screen">
         <Round2Results
           participant={participant}
           questions={questions}
+          ladder={ladder}
+          eliminated={lastResult?.is_correct === false}
           onBack={handleBack}
         />
         <Round2Styles />
@@ -778,7 +892,8 @@ export default function Round2Engine({ participant }) {
                   pickHolding ||
                   pollHolding ||
                   gamePhase === 'transition' ||
-                  gamePhase === 'held'
+                  gamePhase === 'held' ||
+                  gamePhase === 'eliminated'
                 }
                 lifelineStatuses={lifelinesLoaded ? lifelineStatuses : null}
                 activeLifelineKey={activeLifeline?.key || null}
@@ -789,6 +904,8 @@ export default function Round2Engine({ participant }) {
                 // R14 — no ladder set, no button: an empty panel is worse
                 // than no way to open one.
                 onOpenLadder={ladder.length > 0 ? () => setLadderOpen(true) : null}
+                // R15 — what the reveal puts on the blacked-out question.
+                prizeLabel={currentPrizeLabel}
               />
             ) : (
               <div className="r2-center">

@@ -1,21 +1,38 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import PriceTag from './PriceTag';
+import { clearedLevels, checkpointReached } from './checkpoints';
 
 /**
  * Module 5 — Round2Results
  *
  * Shown after Round 2 completes for the Hot Seat participant.
  * Displays:
+ *   - What they take home
  *   - Total score
  *   - Per-question breakdown (correct/wrong, points, response time)
+ *
+ * R15 — the money leads. Points are the tournament's bookkeeping; the
+ * number a contestant walks off with is the last guaranteed checkpoint they
+ * passed on the ladder, and on a wrong answer that is the whole reason this
+ * screen came up. Passing no checkpoint at all is still a result — ₹0, the
+ * floor everybody starts on — so it is shown as a figure rather than left
+ * blank.
+ *
+ * Props:
+ *   ladder     — prize_ladder rows, so the checkpoint can be read without a
+ *                second trip; fetched here when the caller has none
+ *   eliminated — they were knocked out rather than reaching the end of the
+ *                run, which is all that changes the wording
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
-export default function Round2Results({ participant, questions, onBack }) {
+export default function Round2Results({ participant, questions, ladder = null, eliminated = false, onBack }) {
   const [myResponses, setMyResponses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [myTotal, setMyTotal] = useState(0);
+  const [rungs, setRungs] = useState(ladder || []);
 
   useEffect(() => {
     fetchResults();
@@ -37,8 +54,27 @@ export default function Round2Results({ participant, questions, onBack }) {
       setMyTotal(totalPoints);
     }
 
+    // The caller usually has the ladder already (Round2Engine keeps it live
+    // for the panel). Read it only when it does not — and say nothing on a
+    // database without migration_v10: the checkpoint then falls back to the
+    // zero floor, which is the honest answer when there is no ladder.
+    if (!ladder || ladder.length === 0) {
+      const { data: ladderRows } = await supabase
+        .from('prize_ladder')
+        .select('*')
+        .eq('round', 2)
+        .order('level');
+
+      if (ladderRows) setRungs(ladderRows);
+    }
+
     setLoading(false);
   };
+
+  // The rungs they actually cleared, and the checkpoint that pays out.
+  const cleared = clearedLevels(questions, myResponses);
+  const checkpoint = checkpointReached(rungs, cleared);
+  const wonNothing = checkpoint.level === 0;
 
   if (loading) {
     return (
@@ -51,11 +87,31 @@ export default function Round2Results({ participant, questions, onBack }) {
 
   return (
     <div className="r2r">
+      {/* What they take home. The tag first, because it is the only
+          number on this screen the contestant came here for. (R15) */}
+      <div className={`r2r-won ${wonNothing ? 'r2r-won--zero' : ''}`}>
+        <span className="r2r-won-eyebrow">
+          {eliminated ? 'Your run ends here — you take home' : 'You take home'}
+        </span>
+        <div className="r2r-won-tag">
+          <PriceTag label={checkpoint.label} tone={wonNothing ? 'red' : 'gold'} size="lg" />
+        </div>
+        <p className="r2r-won-note">
+          {wonNothing
+            ? 'No checkpoint passed — the run pays the floor everybody starts on.'
+            : `Checkpoint at stage ${checkpoint.level} — the last guaranteed rung you passed.`}
+        </p>
+      </div>
+
       {/* Hero Section */}
       <div className="r2r-hero">
-        <div className="r2r-hero-badge">🔥</div>
-        <h2 className="r2r-hero-title">Hot Seat Complete!</h2>
-        <p className="r2r-hero-tagline">{getHotSeatQuip(myTotal, myResponses, questions.length)}</p>
+        <div className="r2r-hero-badge">{eliminated ? '🎬' : '🔥'}</div>
+        <h2 className="r2r-hero-title">{eliminated ? 'Out of the Hot Seat' : 'Hot Seat Complete!'}</h2>
+        <p className="r2r-hero-tagline">
+          {eliminated
+            ? `You cleared ${cleared} stage${cleared === 1 ? '' : 's'} before the lights went out.`
+            : getHotSeatQuip(myTotal, myResponses, questions.length)}
+        </p>
         <div className="r2r-hero-stats">
           <div className="r2r-stat">
             <span className="r2r-stat-value">{myTotal}</span>
@@ -137,6 +193,64 @@ export default function Round2Results({ participant, questions, onBack }) {
           border-top-color: var(--warning-amber);
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
+        }
+
+        /* ── What they take home (R15) ─────────────────────── */
+        /* Its own block above the hero rather than a stat inside it: the
+           points are how the tournament scores them, and this is the
+           number they will repeat to everyone tonight. */
+        .r2r-won {
+          text-align: center;
+          padding: var(--space-xl) var(--space-lg) var(--space-lg);
+          margin-bottom: var(--space-md);
+          border-radius: var(--radius-xl);
+          border: 1px solid rgba(242,183,5,0.35);
+          background:
+            radial-gradient(ellipse 480px 260px at 50% 0%, rgba(242,183,5,0.16) 0%, transparent 70%),
+            linear-gradient(180deg, rgba(11,20,64,0.75) 0%, rgba(6,12,44,0.75) 100%);
+          animation: heroFadeIn 0.5s ease;
+        }
+
+        .r2r-won--zero {
+          border-color: rgba(229,72,77,0.35);
+          background:
+            radial-gradient(ellipse 480px 260px at 50% 0%, rgba(229,72,77,0.14) 0%, transparent 70%),
+            linear-gradient(180deg, rgba(11,20,64,0.75) 0%, rgba(6,12,44,0.75) 100%);
+        }
+
+        .r2r-won-eyebrow {
+          display: block;
+          font-family: 'Inter', sans-serif;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: var(--pale-gold);
+          margin-bottom: var(--space-md);
+        }
+
+        .r2r-won-tag {
+          display: flex;
+          justify-content: center;
+          animation: r2rTagIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+        }
+
+        @keyframes r2rTagIn {
+          from { opacity: 0; transform: scale(0.72); }
+          60%  { opacity: 1; transform: scale(1.06); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+
+        .r2r-won-note {
+          margin-top: var(--space-md);
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          color: var(--pale-gold);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .r2r-won,
+          .r2r-won-tag { animation: none; opacity: 1; transform: none; }
         }
 
         /* Hero */
@@ -294,6 +408,10 @@ export default function Round2Results({ participant, questions, onBack }) {
         }
 
         @media (max-width: 480px) {
+          .r2r-won-tag .pt {
+            --pt-scale: 0.92;
+          }
+
           .r2r-hero-stats {
             gap: var(--space-md);
           }

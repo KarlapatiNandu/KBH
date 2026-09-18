@@ -2,6 +2,7 @@ import TimerRing from './TimerRing';
 import LifelineBar from './LifelineBar';
 import LifelineIcon from './LifelineIcon';
 import AudiencePoll from './AudiencePoll';
+import PriceTag from './PriceTag';
 import { lifelineLabel } from './lifelines';
 
 /**
@@ -70,6 +71,18 @@ import { lifelineLabel } from './lifelines';
  * nothing in it.
  *
  *   onOpenLadder       — open the prize ladder, or null for no button
+ *
+ * R15 — and the reveal is where the money lands. The moment the host shows
+ * the verdict the whole board fades back, the question bar shades to black
+ * behind it, and the price tag for that rung takes the screen: four fifths
+ * of its width, centred, green if the answer was right and red if it was
+ * wrong (the tag from `assets and references/Price_list_display.png`). The
+ * board is still readable underneath — the options keep their green and red
+ * — but it stops competing: it says *which* answer, and the tag says what it
+ * was worth, which is the thing the room is waiting on.
+ *
+ *   prizeLabel         — what this rung pays, from the ladder; falls back
+ *                        to question.prize
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
@@ -93,9 +106,16 @@ export default function QuestionCard({
   removedOptions = [],
   pollVotes = null,
   onOpenLadder = null,
+  prizeLabel = null,
 }) {
   // The lock-in shows immediately; the verdict waits for the reveal.
   const showVerdict = revealed && lastResult !== null;
+
+  // R15 — the money the reveal is about. The ladder's rung wins over the
+  // question's own prize only when the question has none: the bar above has
+  // been showing question.prize all the way through, and the tag must not
+  // contradict it on the beat it matters.
+  const verdictPrize = showVerdict ? (question.prize || prizeLabel) : null;
 
   // R13 — what the banner under the options is announcing. A lifeline that
   // is actually running reads LIVE; one the host has only picked reads
@@ -147,7 +167,8 @@ export default function QuestionCard({
   const showPoll = Array.isArray(pollVotes) && pollVotes.length > 0;
 
   return (
-    <div className={`r2-qc-card ${showPoll ? 'r2-qc-card--poll' : ''}`}>
+    <>
+    <div className={`r2-qc-card ${showPoll ? 'r2-qc-card--poll' : ''} ${verdictPrize ? 'r2-qc-card--verdict' : ''}`}>
       {/* Meta row */}
       <div className="r2-qc-header">
         <span className="r2-q-badge">{questionNumber}</span>
@@ -247,13 +268,19 @@ export default function QuestionCard({
         />
       </div>
 
-      {/* Question bar */}
+      {/* Question bar
+
+          R15 — on the reveal it goes out: the face shades to black, the
+          question fades back behind it, and the price tag takes the middle
+          of the board. The bar itself does not move, so nothing on the
+          screen below it reflows while the room is looking at the tag. */}
       <div className="r2-rail r2-rail--question">
-        <div className="r2-hex r2-hex--question">
+        <div className={`r2-hex r2-hex--question ${verdictPrize ? 'r2-hex--shaded' : ''}`}>
           <div className="r2-hex-inner">
             <p className="r2-q-text">{question.text}</p>
           </div>
         </div>
+
       </div>
 
       {/* Lifelines — the rail of four badges, as on the show (R10). Null
@@ -572,6 +599,92 @@ export default function QuestionCard({
           margin-bottom: var(--space-lg);
         }
 
+        /* ── The reveal (R15) ────────────────────────────────── */
+        /* The question goes black under the verdict. It is still there —
+           the bar keeps its gold shell and its height, so the board holds
+           its shape — but it stops being the thing on screen, which is the
+           whole point: what is being read now is the money. */
+        .r2-hex--shaded .r2-hex-inner {
+          background: linear-gradient(180deg, #0a0a0a 0%, #000 60%, #000 100%);
+          transition: background 0.55s ease;
+        }
+
+        /* The question goes with it. Left faintly legible it reads as a
+           rendering fault — two words poking out either side of the tag —
+           so it goes out entirely and the bar is simply black. */
+        .r2-hex--shaded .r2-q-text {
+          opacity: 0;
+          transition: opacity 0.4s ease;
+        }
+
+        /* And the board with it. The question, the options, the rail and
+           the clock have all done their job by the time the verdict lands;
+           holding them at full strength next to the money only splits the
+           room's attention. They stay legible — the contestant can still
+           see which option went green — they just stop shouting. */
+        .r2-qc-card--verdict {
+          opacity: 0.22;
+          transition: opacity 0.55s ease;
+        }
+
+        /* The price tag, over the whole screen at four fifths of its width.
+           It comes in a beat after the fade so the two read as one movement
+           — the board drops back, then the money arrives — and it takes no
+           pointer events, because there is nothing on it to press and the
+           board underneath must stay reachable. */
+        .r2-verdict-prize {
+          position: fixed;
+          inset: 0;
+          z-index: 200;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          animation: r2TagIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+        }
+
+        /* 80% of the screen: the bar stretches to fill it while the type
+           and the coin scale on their own, so the tag keeps its proportions
+           on a phone and on a projector alike. */
+        .r2-verdict-prize .pt {
+          width: 80vw;
+          --pt-scale: 2.2;
+        }
+
+        .r2-verdict-prize .pt-bar {
+          flex: 1;
+          min-width: 0;
+        }
+
+        @keyframes r2TagIn {
+          from { opacity: 0; transform: scale(0.5); }
+          60%  { opacity: 1; transform: scale(1.06); }
+          to   { opacity: 1; transform: scale(1); }
+        }
+
+        /* Green when it is theirs, red when it has just gone. The halo is
+           what carries that at a glance from the back of a room. */
+        .r2-verdict-prize--won {
+          filter: drop-shadow(0 0 34px rgba(74,188,132,0.5));
+        }
+
+        .r2-verdict-prize--lost {
+          filter: drop-shadow(0 0 34px rgba(229,72,77,0.5));
+        }
+
+        .r2-sr-only {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          margin: -1px;
+          padding: 0;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          clip-path: inset(50%);
+          white-space: nowrap;
+          border: 0;
+        }
+
         .r2-rail--options {
           grid-template-columns: 1fr 1fr;
           column-gap: var(--space-xl);
@@ -706,6 +819,14 @@ export default function QuestionCard({
         @media (prefers-reduced-motion: reduce) {
           .r2-chosen-lifeline,
           .r2-ll-banner-live { animation: none; }
+
+          /* The tag still has to appear — it just appears rather than
+             swooping. */
+          .r2-verdict-prize {
+            animation: none;
+            opacity: 1;
+            transform: none;
+          }
         }
 
         /* Slot: per-option rail, only used when options stack on mobile */
@@ -976,6 +1097,13 @@ export default function QuestionCard({
             font-size: 18px;
           }
 
+          /* The bar still takes its 80%; only the type and the coin come
+             down, so a phone gets the same tag rather than a cropped one.
+             (R15) */
+          .r2-verdict-prize .pt {
+            --pt-scale: 1.1;
+          }
+
           .r2-prize-row {
             justify-content: center;
           }
@@ -1012,5 +1140,28 @@ export default function QuestionCard({
         }
       `}</style>
     </div>
+
+    {/* The money, over everything. It is out of the card on purpose: the
+        card fades back on the reveal, and a tag inside it would fade with
+        it — this is the one thing on screen that must not. (R15) */}
+    {verdictPrize && (
+      <div
+        className={`r2-verdict-prize ${lastResult.is_correct ? 'r2-verdict-prize--won' : 'r2-verdict-prize--lost'}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="r2-sr-only">
+          {lastResult.is_correct
+            ? `Correct — ${verdictPrize}`
+            : `Wrong — ${verdictPrize} lost`}
+        </span>
+        <PriceTag
+          label={verdictPrize}
+          tone={lastResult.is_correct ? 'green' : 'red'}
+          size="xl"
+        />
+      </div>
+    )}
+    </>
   );
 }
