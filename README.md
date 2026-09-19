@@ -174,14 +174,87 @@ the ladder is drawn up before the show:
   ladder through realtime.
 - **✦** marks a guaranteed rung.
 - Removing a rung from the middle closes the gap behind it: `level` is the
-  rung's position in the climb, and question N of the round is played for rung
-  N, so the ladder is renumbered rather than left with a hole in it.
+  rung's position in the climb, so the ladder is renumbered rather than left
+  with a hole in it.
 
 The ladder is its own table rather than a read of `questions.prize`: the host
 sets how long the run is and what it pays independently of the question list,
 and a rung exists whether or not a question has been written for it yet. The
 per-question **Prize** field is unchanged and still drives the money bar on the
 board.
+
+**Upgrading to question tiers (R16):** run `supabase/migration_v11.sql`. No RPC
+change. Round 2 used to be a queue — the host served question 1, then 2, then 3,
+and the run was whatever order the list happened to be in, one question per rung.
+A question now carries `ladder_level`, the rung it is played for, and **several
+questions can name the same rung**: a pool per tier that the host picks from
+live, instead of a fixed script. The rest of that tier's pool is simply never
+asked.
+
+The migration backfills by position, so a database upgrading to it plays exactly
+the run it played before — question N keeps rung N — until the host starts
+filing questions onto rungs deliberately.
+
+Set a question's rung in the **Questions** tab: Round 2 questions get a **Prize
+rung** picker listing the ladder's own rungs, and the list marks an unfiled one
+`no rung`.
+
+**CSV import** takes a `ladder_level` column (also spelled `rung`, `tier`, or
+`level`), and the downloadable template shows two questions sharing one rung —
+the thing about the column you cannot guess from its name. A bulk import is the
+one moment a whole run gets filed onto the ladder at once, so the preview says
+where it lands rather than only listing rows:
+
+- **Where this lands on the prize ladder** — a pill per rung with how many
+  questions it already holds and how many this file adds. A rung that will
+  still have nothing to ask is dashed and named, because the run steps over it
+  and it pays nothing.
+- A rung the file uses that is **above the top of the ladder** is called out:
+  those questions import off the ladder and are never asked. Lengthen the
+  ladder, or renumber the file.
+- Complaints now come in two kinds. **Errors** still block the whole import
+  until the file is fixed. **Warnings** do not: the question imports, but not
+  the way you probably meant. A `ladder_level` on a Round 1 row (ignored —
+  Round 1 has no ladder), a blank rung cell, or a pre-R16 file with no rung
+  column at all, whose Round 2 questions all land off the ladder. Identical
+  warnings collapse into one line with a count and line numbers.
+
+Importing against a database that has not run the migration still works: the
+importer probes for the column, drops the rungs, and says so in the toast
+rather than failing the whole file.
+
+Round 2's **question console** is then grouped by rung, highest first, like the
+money tree beside it:
+
+- A strip of rung numbers across the top is the climb at a glance — behind the
+  run, on it, or still locked.
+- Only the rung the run is standing on is open for serving. **The run stands on
+  the lowest rung nobody has answered yet**, so answering one of a tier's
+  questions is what opens the tier above it. Nothing here asks whether the
+  answer was *right*: a wrong answer ends the run (R15), and a run that is over
+  does not need a next tier.
+- Serving from any other tier still works and asks first — a question that turns
+  out to be broken, or a rung the host wants to re-ask. A tier gate that cannot
+  be overridden is a gate that strands a show.
+- A rung with **no questions filed for it** is stepped over rather than treated
+  as a wall, and is called out above the list. Otherwise a rung nobody has
+  written for yet stops the show dead.
+- Questions with no rung, or a rung a shortened ladder has since lost, are
+  listed last under **Not on the ladder**. Listed, not dropped: a question that
+  has silently vanished from the console is worse than one out of place.
+
+Tiers want **manual mode**, and the console says so when it is off: auto-advance
+moves the round on by `order_index`, which with a pool per rung is the next
+question in the *bank*, not the next rung. Serving anything by hand turns manual
+mode on anyway.
+
+On the contestant's side the rung is now the question's own, not its place in
+the queue: the board counts *"Question 3 of 10"* against the ladder's height
+rather than the bank's size, and the ladder highlights the rung being played, so
+a host picking a different question from the same tier does not move the
+contestant. What they take home is unchanged in spirit — the last guaranteed
+rung they passed — but a rung is cleared by *any* question played for it being
+answered correctly (`round2/checkpoints.js`).
 
 ### 3. Admin account
 

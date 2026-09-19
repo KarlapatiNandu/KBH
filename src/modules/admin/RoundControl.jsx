@@ -1,28 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
-import QuestionConsole from './QuestionConsole';
-import HotSeatAnswerPanel from './HotSeatAnswerPanel';
-import LifelinePanel from './LifelinePanel';
-import PrizeLadderPanel from './PrizeLadderPanel';
+import Round1Panel from './Round1Panel';
+import Round2Panel from './Round2Panel';
+import { rungForQuestion } from './tiers';
 
 /**
  * Module 2 — Round Control
  *
- * Start / end / reset each round, pick the Round 2 hot seat, and (R5) serve
- * questions by hand through the per-round Question Console.
+ * Start / end / reset each round, and hand each round's own controls to its
+ * own panel: Round1Panel and Round2Panel. This file is now the three things
+ * the two rounds genuinely share — the round_state read, the round lifecycle
+ * (start / end / reset), and the card the panels sit in.
  *
  * The Round 2 hot seat is read from `round_state.active_participant_id`, so a
  * nomination made from the Participants tab or the Live Dashboard shows up
  * here through the same realtime subscription. (R4)
  *
- * Round 2 answers are locked in by the host from here, not by the
- * contestant — see HotSeatAnswerPanel. (R7)
- *
- * Round 2's four lifelines are played from here too — see LifelinePanel. (R10)
- *
- * The prize ladder the contestant opens on their board is set up here as
- * well — see PrizeLadderPanel. Unlike the lifelines it is not gated on the
- * round being live: the ladder is drawn up before the show. (R14)
+ * The layout: Round 2 carries the hot seat, the lifelines, the ladder and a
+ * tiered question pool; Round 1 carries a console and a button. Two equal
+ * columns therefore made Round 1 a mostly-empty half of the screen stretched
+ * to Round 2's height. It now sits in a column sized to its content, at the
+ * top of the row, and the row only splits once there is actually width for
+ * both — measured on the content area rather than the window, because the
+ * sidebar takes 260px of the window that this layout never sees.
  */
 
 export default function RoundControl() {
@@ -31,7 +31,6 @@ export default function RoundControl() {
   const [questions, setQuestions] = useState({ 1: [], 2: [] });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
-  const [search, setSearch] = useState('');
   const [participants, setParticipants] = useState([]);
 
   const showToast = useCallback((message, type = 'success') => {
@@ -59,8 +58,12 @@ export default function RoundControl() {
   const fetchQuestions = useCallback(async () => {
     const { data } = await supabase
       .from('questions')
-      // options/correct_option feed the hot seat answer panel (R7)
-      .select('id, round, text, options, correct_option, base_points, prize, duration_ms, order_index')
+      // `select('*')`, not a column list. Naming `ladder_level` (R16) makes
+      // the whole read fail on a database that has not run migration_v11,
+      // and a failed read here reads back as "this round has no questions" —
+      // the same trap HotSeatAnswerPanel documents for `revealed_at`. The
+      // extra columns cost nothing; the panels take what they need.
+      .select('*')
       .order('order_index');
     if (data) {
       setQuestions({
@@ -152,29 +155,27 @@ export default function RoundControl() {
     fetchState();
   };
 
-  const nominate = async (participantId) => {
-    const { data, error } = await supabase.rpc('nominate_hotseat', {
-      p_participant_id: participantId,
-    });
+  if (loading) return <div className="rc-loading">Loading round state…</div>;
 
-    if (error || !data?.success) {
-      showToast(error?.message || data?.error || 'Failed to nominate', 'error');
-      return;
+  /**
+   * What the header says is live. Round 1 counts questions, because that is
+   * what its round is — a fixed queue. Round 2 counts rungs: with a pool per
+   * tier (R16) the question's position in the list is a number about the
+   * question bank, not about the run the room is watching.
+   */
+  const liveMeta = (roundObj, roundNum) => {
+    const live = questions[roundNum].find(
+      (q) => q.order_index === roundObj.current_question_index
+    );
+    if (!live) return 'Question —';
+
+    if (roundNum === 2) {
+      const rung = rungForQuestion(live, questions[2]);
+      return rung == null ? 'Off the ladder' : `Rung ${rung}`;
     }
 
-    showToast(
-      participantId ? `${data.roll_no} nominated for the hot seat` : 'Hot seat cleared'
-    );
-    setSearch('');
-    fetchState();
+    return `Question ${questions[roundNum].indexOf(live) + 1}`;
   };
-
-  const filteredParticipants = participants.filter((p) => {
-    const q = search.toLowerCase();
-    return p.roll_no.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q);
-  });
-
-  if (loading) return <div className="rc-loading">Loading round state…</div>;
 
   const renderRoundCard = (roundObj, roundNum, title, controls) => {
     if (!roundObj) return null;
@@ -184,7 +185,7 @@ export default function RoundControl() {
     return (
       <div className={`rc-card card ${isActive ? 'rc-card--active' : 'card--solid'}`}>
         <div className="rc-header">
-          <div>
+          <div className="rc-title">
             <h3>{title}</h3>
             <span className={`badge badge--${roundObj.status}`}>
               {roundObj.status.toUpperCase()}
@@ -195,11 +196,7 @@ export default function RoundControl() {
           </div>
           <div className="rc-meta">
             {isActive && (
-              <span className="rc-question-meta">
-                Question {(questions[roundNum].findIndex(
-                  (q) => q.order_index === roundObj.current_question_index
-                ) + 1) || '—'}
-              </span>
+              <span className="rc-question-meta">{liveMeta(roundObj, roundNum)}</span>
             )}
           </div>
         </div>
@@ -242,143 +239,28 @@ export default function RoundControl() {
     <div className="rc">
       <div className="rc-grid">
 
-        {/* ── Round 1 ── */}
         {renderRoundCard(round1, 1, 'Round 1: Fastest Finger First', (
-          <div className="rc-control-box">
-            <p className="rc-desc">
-              Synchronized round for all participants. Starting it puts the first
-              question live for everyone connected.
-            </p>
-
-            <QuestionConsole
-              round={1}
-              roundState={round1}
-              questions={questions[1]}
-              onResult={showToast}
-              onChanged={fetchState}
-            />
-
-            <button
-              className={`btn ${round1?.status === 'active' ? 'btn-danger' : 'btn-primary'}`}
-              onClick={() => {
-                if (round1?.status === 'active') {
-                  if (window.confirm('End Round 1 early?')) endRound(1);
-                } else if (window.confirm('Start Round 1 now?')) {
-                  startRound(1);
-                }
-              }}
-            >
-              {round1?.status === 'active' ? 'End Round 1' : 'Start Round 1'}
-            </button>
-          </div>
+          <Round1Panel
+            roundState={round1}
+            questions={questions[1]}
+            onResult={showToast}
+            onChanged={fetchState}
+            onStart={() => startRound(1)}
+            onEnd={() => endRound(1)}
+          />
         ))}
 
-        {/* ── Round 2 ── */}
         {renderRoundCard(round2, 2, 'Round 2: Hot Seat', (
-          <div className="rc-control-box">
-            <p className="rc-desc">
-              Nominate one participant for the hot seat. Only they see active
-              questions; everyone else gets a disabled placeholder. The
-              contestant says their answer aloud and you lock it in here —
-              their screen is read-only.
-            </p>
-
-            <div className="rc-hs-select">
-              <label className="form-label">Hot seat</label>
-
-              {hotSeat ? (
-                <div className="rc-selected-player">
-                  <span className="rc-player-roll">{hotSeat.roll_no}</span>
-                  <span className="rc-player-name">{hotSeat.name || '—'}</span>
-                  {round2?.status !== 'active' && (
-                    <button
-                      className="btn-icon rc-clear-hs"
-                      title="Clear nomination"
-                      onClick={() => nominate(null)}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="rc-participant-search">
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Search participant to nominate…"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-
-                  {search && (
-                    <div className="rc-search-results">
-                      {filteredParticipants.slice(0, 5).map((p) => (
-                        <div
-                          key={p.id}
-                          className="rc-search-item"
-                          onClick={() => nominate(p.id)}
-                        >
-                          <span className="rc-item-roll">{p.roll_no}</span>
-                          <span
-                            className="rc-item-name"
-                            style={p.network_status === 'failed'
-                              ? { color: 'var(--danger-red)' }
-                              : undefined}
-                          >
-                            {p.name || '—'}
-                          </span>
-                        </div>
-                      ))}
-                      {filteredParticipants.length === 0 && (
-                        <div className="rc-search-empty">No matches</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <HotSeatAnswerPanel
-              roundState={round2}
-              questions={questions[2]}
-              hotSeat={hotSeat}
-              onResult={showToast}
-            />
-
-            <LifelinePanel
-              roundState={round2}
-              questions={questions[2]}
-              onResult={showToast}
-            />
-
-            {/* R14 — how many rungs the run has and what each one pays.
-                Always available: the ladder is drawn up before the round
-                starts, and a rung re-priced mid-run should not need the
-                round ended to change it. */}
-            <PrizeLadderPanel round={2} onResult={showToast} />
-
-            <QuestionConsole
-              round={2}
-              roundState={round2}
-              questions={questions[2]}
-              onResult={showToast}
-              onChanged={fetchState}
-            />
-
-            <button
-              className={`btn ${round2?.status === 'active' ? 'btn-danger' : 'btn-primary'}`}
-              onClick={() => {
-                if (round2?.status === 'active') {
-                  if (window.confirm('End Round 2 early?')) endRound(2);
-                } else if (window.confirm(`Start Round 2 for ${hotSeat?.roll_no}?`)) {
-                  startRound(2);
-                }
-              }}
-              disabled={round2?.status !== 'active' && !hotSeat}
-            >
-              {round2?.status === 'active' ? 'End Round 2' : 'Start Round 2'}
-            </button>
-          </div>
+          <Round2Panel
+            roundState={round2}
+            questions={questions[2]}
+            participants={participants}
+            hotSeat={hotSeat}
+            onResult={showToast}
+            onChanged={fetchState}
+            onStart={() => startRound(2)}
+            onEnd={() => endRound(2)}
+          />
         ))}
       </div>
 
@@ -391,10 +273,22 @@ export default function RoundControl() {
           color: var(--pale-gold);
         }
 
+        .rc {
+          /* The breakpoints below are about how much room these two cards
+             have, which is the window minus a 260px sidebar and the content
+             padding. Measuring the window instead is what made a "desktop"
+             layout appear at 768px in a 444px-wide column. */
+          container: rc / inline-size;
+        }
+
         .rc-grid {
           display: grid;
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
           gap: var(--space-lg);
+          /* Round 1 is a console and a button; Round 2 is the whole hot seat.
+             Stretching the short card to the tall one's height just to keep
+             the row tidy leaves a half-screen of empty gradient under it. */
+          align-items: start;
           max-width: 800px;
           margin: 0 auto;
         }
@@ -402,6 +296,11 @@ export default function RoundControl() {
         .rc-card {
           display: flex;
           flex-direction: column;
+          /* Grid items are min-width:auto, so the widest thing inside either
+             card — a long question, a row of buttons — could push its column
+             past the track and the whole page sideways. This is the fix for
+             the admin's horizontal scrollbar. */
+          min-width: 0;
         }
 
         .rc-card--active {
@@ -413,10 +312,14 @@ export default function RoundControl() {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
+          gap: var(--space-sm);
+          flex-wrap: wrap;
           margin-bottom: var(--space-md);
           border-bottom: 1px solid rgba(242,183,5,0.1);
           padding-bottom: var(--space-sm);
         }
+
+        .rc-title { min-width: 0; }
 
         .rc-header h3 {
           font-size: 20px;
@@ -425,7 +328,10 @@ export default function RoundControl() {
 
         .rc-mode-badge { margin-left: 6px; }
 
-        .rc-meta { text-align: right; }
+        .rc-meta {
+          text-align: right;
+          flex-shrink: 0;
+        }
 
         .rc-question-meta {
           font-family: 'Poppins', sans-serif;
@@ -434,101 +340,10 @@ export default function RoundControl() {
           font-size: 16px;
         }
 
-        .rc-body { flex: 1; }
-
-        .rc-desc {
-          color: var(--pale-gold);
-          font-size: 14px;
-          margin-bottom: var(--space-lg);
-          line-height: 1.5;
+        .rc-body {
+          flex: 1;
+          min-width: 0;
         }
-
-        .rc-control-box {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-        }
-
-        .rc-hs-select {
-          width: 100%;
-          margin-bottom: var(--space-lg);
-          background: rgba(11,20,64, 0.4);
-          padding: var(--space-md);
-          border-radius: var(--radius-md);
-          border: 1px solid rgba(242,183,5,0.1);
-        }
-
-        .rc-participant-search {
-          position: relative;
-          margin-top: var(--space-xs);
-        }
-
-        .rc-participant-search input { width: 100%; }
-
-        .rc-search-results {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          background: var(--deep-midnight);
-          border: 1px solid var(--antique-gold);
-          border-radius: var(--radius-md);
-          margin-top: 4px;
-          max-height: 200px;
-          overflow-y: auto;
-          z-index: 10;
-          box-shadow: var(--shadow-card);
-        }
-
-        .rc-search-item {
-          padding: 10px 14px;
-          display: flex;
-          gap: 12px;
-          cursor: pointer;
-          border-bottom: 1px solid rgba(242,183,5,0.1);
-        }
-
-        .rc-search-item:hover { background: rgba(242,183,5,0.08); }
-
-        .rc-item-roll {
-          font-family: 'Poppins', sans-serif;
-          font-weight: 600;
-          color: var(--cloud-white);
-        }
-
-        .rc-item-name { color: var(--pale-gold); }
-
-        .rc-search-empty {
-          padding: 10px 14px;
-          color: var(--pale-gold);
-          font-size: 13px;
-          text-align: center;
-        }
-
-        .rc-selected-player {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-top: var(--space-xs);
-          padding: 12px;
-          background: rgba(242,183,5,0.1);
-          border: 1px solid var(--antique-gold);
-          border-radius: var(--radius-md);
-        }
-
-        .rc-player-roll {
-          font-family: 'Poppins', sans-serif;
-          font-weight: 700;
-          font-size: 18px;
-          color: var(--spotlight-gold);
-        }
-
-        .rc-player-name {
-          font-size: 16px;
-          font-weight: 500;
-        }
-
-        .rc-clear-hs { margin-left: auto; }
 
         .rc-actions {
           margin-top: var(--space-xl);
@@ -540,10 +355,59 @@ export default function RoundControl() {
           flex-wrap: wrap;
         }
 
-        @media (min-width: 768px) {
+        /* ── Phone ── */
+        @media (max-width: 560px) {
+          .rc-card {
+            /* .card's 28px sides cost a phone a fifth of its width. */
+            padding: var(--space-md) var(--space-md) var(--space-lg);
+          }
+
+          .rc-header h3 { font-size: 17px; }
+
+          .rc-meta { text-align: left; }
+
+          /* Two full-width rows, in reading order. Side by side these wrap to
+             a ragged pair of half-buttons, and one of them deletes responses. */
+          .rc-actions {
+            justify-content: stretch;
+            flex-direction: column;
+          }
+
+          .rc-actions .btn { width: 100%; }
+        }
+
+        /* ── Two columns, once the content area can hold both ── */
+        @container rc (min-width: 860px) {
           .rc-grid {
-            grid-template-columns: 1fr 1fr;
+            /* Round 1 gets what it needs and no more; Round 2 takes the rest. */
+            grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
             max-width: 100%;
+          }
+        }
+
+        @container rc (min-width: 1180px) {
+          .rc-grid {
+            grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+            max-width: 1500px;
+          }
+        }
+
+        /* Without containment the queries above never match and the grid
+           stays one column — correct, but needlessly narrow on a desktop.
+           Fall back to the window, minus the sidebar and padding. */
+        @supports not (container-type: inline-size) {
+          @media (min-width: 1184px) {
+            .rc-grid {
+              grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+              max-width: 100%;
+            }
+          }
+
+          @media (min-width: 1504px) {
+            .rc-grid {
+              grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+              max-width: 1500px;
+            }
           }
         }
       `}</style>

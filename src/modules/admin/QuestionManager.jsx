@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import QuestionCsvImport from './QuestionCsvImport';
+import { hasRungColumn } from './tiers';
 
 /**
  * Declared at module scope on purpose: defining it inside QuestionManager
@@ -39,8 +40,49 @@ function OptionEditor({ options, correctOption, onChange, onCorrectChange }) {
 }
 
 
+/**
+ * R16 — which prize rung a Round 2 question is played for. A list of the
+ * ladder's own rungs rather than a number box: the host thinks in money
+ * ("the ₹40,000 question"), and a number typed past the top of the ladder is
+ * a question that quietly never gets asked.
+ *
+ * Blank is a real choice, not a missing one — a question written before the
+ * ladder was drawn up is unfiled, and the host's console lists those
+ * separately instead of playing them for the bottom rung.
+ */
+function RungPicker({ value, rungs, onChange }) {
+  // A rung the ladder no longer has — it was shortened after this question
+  // was filed. Kept as an option so editing anything else about the question
+  // does not silently move it.
+  const orphaned = value !== '' && !rungs.some((r) => String(r.level) === String(value));
+
+  return (
+    <select
+      className="form-select"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title="Which prize rung this question is played for"
+    >
+      <option value="">Not on the ladder</option>
+      {/* Nothing to file onto: the ladder is drawn up in Round Control, and
+          without it the picker is one meaningless choice. */}
+      {rungs.length === 0 && (
+        <option value="" disabled>— set the prize ladder up in Round Control —</option>
+      )}
+      {rungs.map((r) => (
+        <option key={r.level} value={r.level}>
+          {r.level} — {r.label}{r.is_milestone ? ' ✦' : ''}
+        </option>
+      ))}
+      {orphaned && <option value={value}>{value} — off the ladder</option>}
+    </select>
+  );
+}
+
 // R8 — time is edited in seconds and stored in ms; blank means "use the
 // round default" (round_state.question_duration_ms). Prize is free text.
+// R16 — ladder_level is held as a string while it is a form field, blank for
+// "not on the ladder", and turned into a number or NULL on save.
 const EMPTY_QUESTION = {
   round: 1,
   text: '',
@@ -49,12 +91,18 @@ const EMPTY_QUESTION = {
   base_points: 100,
   duration_s: '',
   prize: '',
+  ladder_level: '',
 };
 
 const msToSeconds = (ms) => (ms == null ? '' : String(ms / 1000));
 const secondsToMs = (s) => {
   const n = parseFloat(s);
   return Number.isFinite(n) && n > 0 ? Math.round(n * 1000) : null;
+};
+
+const toRung = (v) => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
 };
 
 export default function QuestionManager() {
@@ -67,14 +115,29 @@ export default function QuestionManager() {
   const [showImport, setShowImport] = useState(false);
   const [toast, setToast] = useState(null);
   const [newQuestion, setNewQuestion] = useState(EMPTY_QUESTION);
+  // R16 — the rungs a Round 2 question can be filed on. Read once: the ladder
+  // is edited in Round Control, and a host is not doing both at the same time.
+  const [rungs, setRungs] = useState([]);
 
   useEffect(() => {
     fetchQuestions();
+    fetchRungs();
   }, []);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // No error branch: a database without migration_v10 has no ladder, and an
+  // empty rung list already reads as "nothing to file onto yet".
+  const fetchRungs = async () => {
+    const { data } = await supabase
+      .from('prize_ladder')
+      .select('level, label, is_milestone')
+      .eq('round', 2)
+      .order('level');
+    if (data) setRungs(data);
   };
 
   const fetchQuestions = async () => {
@@ -97,6 +160,12 @@ export default function QuestionManager() {
     ? questions
     : questions.filter((q) => q.round === filterRound);
 
+  // R16 — naming `ladder_level` in an insert or update against a database
+  // without migration_v11 fails the whole statement, which would break adding
+  // and editing every question, not just the rung. So the field is hidden and
+  // left out of the payload until the column is actually there.
+  const canFileRungs = hasRungColumn(questions);
+
   const startEdit = (q) => {
     setEditingId(q.id);
     setEditForm({
@@ -106,6 +175,8 @@ export default function QuestionManager() {
       base_points: q.base_points,
       duration_s: msToSeconds(q.duration_ms),
       prize: q.prize ?? '',
+      ladder_level: q.ladder_level == null ? '' : String(q.ladder_level),
+      round: q.round,
     });
   };
 
@@ -124,6 +195,11 @@ export default function QuestionManager() {
         base_points: editForm.base_points,
         duration_ms: secondsToMs(editForm.duration_s),
         prize: editForm.prize.trim() || null,
+        // Round 1 has no ladder, so a rung on one of its questions is noise
+        // that the console would have to filter out again. (R16)
+        ...(canFileRungs
+          ? { ladder_level: editForm.round === 2 ? toRung(editForm.ladder_level) : null }
+          : {}),
       })
       .eq('id', id);
 
@@ -176,6 +252,9 @@ export default function QuestionManager() {
       base_points: newQuestion.base_points,
       duration_ms: secondsToMs(newQuestion.duration_s),
       prize: newQuestion.prize.trim() || null,
+      ...(canFileRungs
+        ? { ladder_level: newQuestion.round === 2 ? toRung(newQuestion.ladder_level) : null }
+        : {}),
       order_index: maxOrder + 1,
     });
 
@@ -300,6 +379,18 @@ export default function QuestionManager() {
                   onChange={(e) => setNewQuestion({ ...newQuestion, prize: e.target.value })}
                 />
               </div>
+              {/* R16 — Round 2 only: Round 1 is a fixed queue with no ladder
+                  behind it, so there is no rung to play a question for. */}
+              {newQuestion.round === 2 && canFileRungs && (
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Prize rung</label>
+                  <RungPicker
+                    value={newQuestion.ladder_level}
+                    rungs={rungs}
+                    onChange={(v) => setNewQuestion({ ...newQuestion, ladder_level: v })}
+                  />
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label className="form-label">Question Text</label>
@@ -354,6 +445,20 @@ export default function QuestionManager() {
                     ⏱ {q.duration_ms != null ? `${q.duration_ms / 1000}s` : 'default'}
                   </span>
                   {q.prize && <span className="qm-prize">{q.prize}</span>}
+                  {/* R16 — the rung it is played for. Called out when it has
+                      none, because an unfiled Round 2 question is never
+                      reached by the run. */}
+                  {q.round === 2 && canFileRungs && (
+                    q.ladder_level == null ? (
+                      <span className="qm-rung qm-rung--unfiled" title="Not on the prize ladder — the run never reaches it">
+                        no rung
+                      </span>
+                    ) : (
+                      <span className="qm-rung" title="The prize rung this question is played for">
+                        rung {q.ladder_level}
+                      </span>
+                    )
+                  )}
                 </div>
                 <div className="qm-item-actions">
                   <button className="btn-icon" onClick={() => moveQuestion(q, -1)} title="Move up">↑</button>
@@ -415,6 +520,16 @@ export default function QuestionManager() {
                         onChange={(e) => setEditForm({ ...editForm, prize: e.target.value })}
                       />
                     </div>
+                    {q.round === 2 && canFileRungs && (
+                      <div className="form-group" style={{ flex: 1 }}>
+                        <label className="form-label">Prize rung</label>
+                        <RungPicker
+                          value={editForm.ladder_level}
+                          rungs={rungs}
+                          onChange={(v) => setEditForm({ ...editForm, ladder_level: v })}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="form-group">
                     <label className="form-label">Options</label>
@@ -489,7 +604,12 @@ export default function QuestionManager() {
         .qm-add-row {
           display: flex;
           gap: var(--space-md);
+          /* Five fields on one line (R16 added the fifth) squeeze the round
+             select down to an unreadable stub on anything but a wide window. */
+          flex-wrap: wrap;
         }
+
+        .qm-add-row .form-group { min-width: 140px; }
 
         .qm-add-actions {
           display: flex;
@@ -604,6 +724,23 @@ export default function QuestionManager() {
           color: var(--spotlight-gold);
         }
 
+        /* R16 */
+        .qm-rung {
+          font-family: 'Poppins', sans-serif;
+          font-size: 11px;
+          font-weight: 600;
+          padding: 2px 8px;
+          border-radius: var(--radius-pill);
+          border: 1px solid rgba(242,183,5,0.3);
+          color: var(--pale-gold);
+          white-space: nowrap;
+        }
+
+        .qm-rung--unfiled {
+          border-color: var(--warning-amber);
+          color: var(--warning-amber);
+        }
+
         .qm-item-actions {
           display: flex;
           align-items: center;
@@ -672,6 +809,24 @@ export default function QuestionManager() {
         @media (max-width: 600px) {
           .qm-options {
             grid-template-columns: 1fr;
+          }
+
+          /* One field per line: a wrapped pair leaves one of them orphaned on
+             its own row anyway, and labels stop lining up with their inputs. */
+          .qm-add-row { flex-direction: column; }
+          .qm-add-row .form-group { min-width: 0; }
+
+          .qm-toolbar,
+          .qm-filters,
+          .qm-toolbar-actions { width: 100%; }
+
+          .qm-filters .btn,
+          .qm-toolbar-actions .btn { flex: 1; }
+
+          .qm-item-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: var(--space-sm);
           }
         }
       `}</style>

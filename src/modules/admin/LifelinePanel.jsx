@@ -779,6 +779,10 @@ function LifelinePanelStyles() {
         border-radius: var(--radius-md);
         border: 1px solid rgba(242,183,5,0.3);
         background: rgba(11,20,64,0.45);
+        /* The four lifeline cards are laid out against this panel's own width
+           rather than the window's: on a desktop it is one column of Round
+           Control, not the screen. */
+        container: llp / inline-size;
       }
 
       .llp--warning {
@@ -1256,8 +1260,17 @@ function LifelinePanelStyles() {
 
       .llb-add:hover:not(:disabled) { border-color: var(--spotlight-gold); }
 
-      @media (max-width: 560px) {
+      /* A lifeline card holds a name, a status pill and a button; below about
+         this width the pair of them start truncating all three. */
+      @container llp (max-width: 420px) {
         .llp-grid { grid-template-columns: 1fr; }
+        .llp-strike-opts { grid-template-columns: 1fr; }
+      }
+
+      @supports not (container-type: inline-size) {
+        @media (max-width: 560px) {
+          .llp-grid { grid-template-columns: 1fr; }
+        }
       }
     `}</style>
   );

@@ -6,6 +6,9 @@ import Round2Results from './Round2Results';
 import PhoneOverlay from './PhoneOverlay';
 import PrizeLadder from './PrizeLadder';
 import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './lifelines';
+// The rung a question is played for (R16) — shared with the host's console,
+// so both screens agree on where the run is standing.
+import { rungForQuestion } from '../admin/tiers';
 
 /**
  * Module 5 — Round2Engine
@@ -587,19 +590,22 @@ export default function Round2Engine({ participant }) {
     ? questions.find((q) => q.order_index === roundState.current_question_index) || null
     : null;
 
-  // Position within the round, not the raw order_index - the host can serve
-  // out of order and "Question 3 of 5" should still read sensibly.
-  const currentQuestionNumber = currentQuestion
-    ? questions.findIndex((q) => q.id === currentQuestion.id) + 1
-    : 0;
-
-  // R15 — the rung this question is played for, so the reveal has a number
-  // to put on the blacked-out board. Question N of the run is level N, the
-  // same position the ladder panel marks as "now". The question's own prize
+  // R15/R16 — the rung this question is played for, so the reveal has a
+  // number to put on the blacked-out board. The question says which rung it
+  // is for; on a database without migration_v11 it does not, and there the
+  // queue was the ladder, so its position stands in. The question's own prize
   // wins where it has one — that is what the bar above it has been showing
   // all along.
-  const currentRung = ladder.find((r) => r.level === currentQuestionNumber) || null;
+  const currentLevel = rungForQuestion(currentQuestion, questions);
+  const currentRung = ladder.find((r) => r.level === currentLevel) || null;
   const currentPrizeLabel = currentQuestion?.prize || currentRung?.label || null;
+
+  // R16 — what the board counts. "Question 3 of 5" was the queue's length
+  // back when the queue was the run; with a pool per rung the bank may hold
+  // thirty questions for a ten-rung climb, and the contestant is climbing the
+  // ladder, not reading the bank.
+  const boardNumber = currentLevel ?? 0;
+  const boardTotal = ladder.length || questions.length;
 
   // Per-question time wins over the round default. (R8)
   const questionDurationMs =
@@ -874,8 +880,8 @@ export default function Round2Engine({ participant }) {
             {currentQuestion ? (
               <QuestionCard
                 question={currentQuestion}
-                questionNumber={currentQuestionNumber}
-                totalQuestions={questions.length}
+                questionNumber={boardNumber}
+                totalQuestions={boardTotal}
                 timeUp={hasAnswered && selectedOption === null}
                 lastResult={lastResult}
                 revealed={revealed}
@@ -947,11 +953,11 @@ export default function Round2Engine({ participant }) {
         {ladderOpen && ladder.length > 0 && (
           <PrizeLadder
             rungs={ladder}
-            // Question N of the run is played for rung N — the same
-            // position the board counts in "Question 3 of 6", so a host
-            // serving out of order does not move the contestant down the
-            // ladder.
-            currentLevel={currentQuestionNumber || null}
+            // The rung the live question is played for (R16) — the same
+            // number the board counts in "Question 3 of 10", so a host
+            // picking a different question from the same tier does not move
+            // the contestant on the ladder.
+            currentLevel={currentLevel || null}
             lifelineStatuses={lifelinesLoaded ? lifelineStatuses : null}
             onClose={() => setLadderOpen(false)}
           />

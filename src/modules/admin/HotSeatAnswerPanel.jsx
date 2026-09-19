@@ -286,6 +286,10 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
           border: 1px solid var(--spotlight-gold);
           background: rgba(242,183,5,0.06);
           box-shadow: 0 0 0 2px rgba(242,183,5,0.12);
+          /* Queried against itself below: on a desktop this panel sits in a
+             column, not across the window, so the window's width says nothing
+             about how much room the four option buttons have. */
+          container: hsa / inline-size;
         }
 
         .hsa--empty {
@@ -546,8 +550,16 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
           color: var(--pale-gold);
         }
 
-        @media (max-width: 560px) {
+        /* Two options side by side need roughly 190px each before the answer
+           text starts wrapping mid-word. */
+        @container hsa (max-width: 420px) {
           .hsa-options { grid-template-columns: 1fr; }
+        }
+
+        @supports not (container-type: inline-size) {
+          @media (max-width: 560px) {
+            .hsa-options { grid-template-columns: 1fr; }
+          }
         }
       `}</style>
     </div>

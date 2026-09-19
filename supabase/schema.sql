@@ -50,10 +50,16 @@ CREATE TABLE IF NOT EXISTS questions (
   duration_ms     INT CHECK (duration_ms IS NULL OR duration_ms > 0),
   -- Free-text prize shown on the Round 2 screen, e.g. "₹10,000" (R8)
   prize           TEXT,
+  -- Round 2: which prize_ladder rung this question is played for. Several
+  -- questions may share a rung — they are a pool the host picks from live,
+  -- and the run moves up a tier once one of them has been answered. NULL is
+  -- "not placed on the ladder yet", which is not the same as rung 0. (R16)
+  ladder_level    INT CHECK (ladder_level IS NULL OR ladder_level > 0),
   created_at      TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_round_order ON questions (round, order_index);
+CREATE INDEX IF NOT EXISTS idx_questions_round_ladder ON questions (round, ladder_level);
 
 -- ─── round_state ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS round_state (

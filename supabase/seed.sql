@@ -64,19 +64,22 @@ WHERE NOT EXISTS (SELECT 1 FROM questions q WHERE q.round = 1);
 
 
 -- ─── Round 2 Questions (5) ──────────────────────────────────
-INSERT INTO questions (round, text, options, correct_option, base_points, order_index)
+-- Filed onto the bottom three rungs of the ladder rather than one per rung,
+-- so a fresh database shows what `ladder_level` is for (R16): rungs 1 and 2
+-- are pools of two, and the host picks which one the contestant gets.
+INSERT INTO questions (round, text, options, correct_option, base_points, order_index, ladder_level)
 SELECT * FROM (VALUES
   (2, 'What is the currency of Japan?',
-     '["Won", "Yuan", "Yen", "Ringgit"]'::jsonb, 2, 100, 0),
+     '["Won", "Yuan", "Yen", "Ringgit"]'::jsonb, 2, 100, 0, 1),
   (2, 'Which element has atomic number 1?',
-     '["Helium", "Hydrogen", "Lithium", "Carbon"]'::jsonb, 1, 100, 1),
+     '["Helium", "Hydrogen", "Lithium", "Carbon"]'::jsonb, 1, 100, 1, 1),
   (2, 'Who painted the Mona Lisa?',
-     '["Michelangelo", "Raphael", "Leonardo da Vinci", "Donatello"]'::jsonb, 2, 100, 2),
+     '["Michelangelo", "Raphael", "Leonardo da Vinci", "Donatello"]'::jsonb, 2, 100, 2, 2),
   (2, 'What is the tallest mountain in the world?',
-     '["K2", "Kangchenjunga", "Mount Everest", "Lhotse"]'::jsonb, 2, 100, 3),
+     '["K2", "Kangchenjunga", "Mount Everest", "Lhotse"]'::jsonb, 2, 100, 3, 2),
   (2, 'Which country hosted the 2016 Summer Olympics?',
-     '["China", "UK", "Brazil", "Japan"]'::jsonb, 2, 100, 4)
-) AS v(round, text, options, correct_option, base_points, order_index)
+     '["China", "UK", "Brazil", "Japan"]'::jsonb, 2, 100, 4, 3)
+) AS v(round, text, options, correct_option, base_points, order_index, ladder_level)
 WHERE NOT EXISTS (SELECT 1 FROM questions q WHERE q.round = 2);
 
 
