@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import QuestionCsvImport from './QuestionCsvImport';
 
 /**
  * Declared at module scope on purpose: defining it inside QuestionManager
@@ -63,6 +64,7 @@ export default function QuestionManager() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [toast, setToast] = useState(null);
   const [newQuestion, setNewQuestion] = useState(EMPTY_QUESTION);
 
@@ -225,10 +227,30 @@ export default function QuestionManager() {
             onClick={() => setFilterRound(2)}
           >Round 2</button>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
-          + Add Question
-        </button>
+        <div className="qm-toolbar-actions">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => { setShowImport((v) => !v); setShowAdd(false); }}
+          >
+            ⬆ Import CSV
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => { setShowAdd(true); setShowImport(false); }}
+          >
+            + Add Question
+          </button>
+        </div>
       </div>
+
+      {/* Bulk import — questions are usually written in a spreadsheet first */}
+      {showImport && (
+        <QuestionCsvImport
+          onImported={fetchQuestions}
+          onClose={() => setShowImport(false)}
+          showToast={showToast}
+        />
+      )}
 
       {/* Add Question Form */}
       {showAdd && (
@@ -439,6 +461,11 @@ export default function QuestionManager() {
         }
 
         .qm-filters {
+          display: flex;
+          gap: var(--space-sm);
+        }
+
+        .qm-toolbar-actions {
           display: flex;
           gap: var(--space-sm);
         }
