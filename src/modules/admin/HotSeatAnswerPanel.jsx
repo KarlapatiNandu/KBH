@@ -228,6 +228,17 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
 
       <p className="hsa-question">{liveQuestion.text}</p>
 
+      {/* R20 — the answer, for the host's eyes, from the moment the question
+          is served. A side note rather than a highlight: the options below
+          only mark the correct one once something is locked in, and until
+          then the host was reading the question off this panel and the answer
+          off a printout. */}
+      <p className="hsa-answer">
+        <span className="hsa-answer-label">Answer</span>
+        <span className="hsa-answer-letter">{OPTION_LABELS[liveQuestion.correct_option]}</span>
+        <span className="hsa-answer-text">{liveQuestion.options[liveQuestion.correct_option]}</span>
+      </p>
+
       {awaitingOptions && (
         <div className="hsa-stage">
           <span className="hsa-stage-text">
@@ -419,6 +430,41 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
           line-height: 1.4;
           color: var(--cloud-white);
           margin: 0 0 var(--space-md);
+        }
+
+        /* R20 — the correct option, kept deliberately quiet: it sits under
+           the question as a note, not as a fifth answer to read. */
+        .hsa-answer {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin: calc(-1 * var(--space-sm)) 0 var(--space-md);
+          padding-left: 10px;
+          border-left: 2px solid rgba(242,183,5,0.35);
+          font-size: 12px;
+          line-height: 1.4;
+          color: var(--pale-gold);
+        }
+
+        .hsa-answer-label {
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          opacity: 0.75;
+        }
+
+        .hsa-answer-letter {
+          font-family: 'Poppins', sans-serif;
+          font-weight: 700;
+          color: var(--spotlight-gold);
+        }
+
+        .hsa-answer-text {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow-wrap: anywhere;
         }
 
         .hsa-options {

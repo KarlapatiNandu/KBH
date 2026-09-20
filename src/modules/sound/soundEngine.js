@@ -33,6 +33,8 @@ const WATCH_MS = 20;
 
 const audios = new Map(); // id -> HTMLAudioElement
 const fades = new Map(); // id -> interval id of a fade-out in flight
+// id -> callbacks waiting for that clip to finish on its own. (R20)
+const endListeners = new Map();
 // id -> interval watching that clip's playhead for the end of its music. A
 // clip is either looping or handing over to the next, never both, so one
 // watcher per clip is all there is.
@@ -210,7 +212,25 @@ export function play(id, { loop = false } = {}) {
   a.loop = loop && !Number.isFinite(to);
   seek(a, from);
   a.play().catch((err) => console.warn(`Sound "${id}" could not play:`, err.message));
-  if (!loop || a.loop) return;
+
+  if (!loop) {
+    // R20 — a one-shot is over at the end of its music, not at the end of
+    // the file: waiting out the silent tail would hold the end of a run
+    // (Round2Engine) a second past the last note. The tail is left to play
+    // under the silence rather than cut, exactly as a chained clip's is.
+    // Nothing follows a one-shot — what comes after it is silence until the
+    // next cue.
+    const done = () => {
+      unwatch(id);
+      a.onended = null;
+      ended(id);
+    };
+    a.onended = done;
+    watch(id, a, to, done);
+    return;
+  }
+
+  if (a.loop) return;
 
   watch(id, a, to, () => seek(a, from));
   // A tab the browser has throttled can have its watcher wake late enough
@@ -240,6 +260,31 @@ export function playThen(id, nextId, { loopNext = false } = {}) {
   };
   a.onended = handover;
   watch(id, a, music(id)[1], handover);
+}
+
+/**
+ * R20 — call `fn` when `id` next finishes playing on its own. A clip that is
+ * stopped, faded out or cut off by another cue has not finished, so nothing
+ * fires for it: this is "the music ended", which is the beat the end of a
+ * run waits on (Round2Engine). Returns a disposer.
+ */
+export function onEnded(id, fn) {
+  let set = endListeners.get(id);
+  if (!set) {
+    set = new Set();
+    endListeners.set(id, set);
+  }
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (set.size === 0) endListeners.delete(id);
+  };
+}
+
+function ended(id) {
+  const set = endListeners.get(id);
+  if (!set) return;
+  [...set].forEach((fn) => fn());
 }
 
 export function stop(id, { fade = true } = {}) {

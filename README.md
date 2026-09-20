@@ -302,6 +302,15 @@ names, from `assets and references/sound_effects/`).
   locked, or a verdict, or a live poll, stays quiet until the next cue. The
   after-lock suspense clip is no longer cued by itself — it is on the Sound
   Board for the host to fire by hand.
+- **The KBC intro ends the run (R20).** The intro is still the one clip with
+  no automatic cue — the host plays it from the Sound Board over a win. On the
+  **top rung of the ladder, answered right**, that press is also the end of
+  Round 2: the board holds the final question for as long as the music runs,
+  and the moment the music ends the contestant goes to **Round 2 Results**
+  (as a completed run, not a knock-out). Nothing loops it, and nothing picks
+  up after it — at a checkpoint the room is left in silence until the next
+  serve. A run whose intro is never played holds on the board as before, until
+  the host ends the round.
 - **Sound Board** — the **🔊 Sounds** button in the admin top bar opens a dock
   down the right side that stays put on any tab. Every clip has a button there
   (the **KBC intro** has nothing else — no automatic cue), plus **Stop all**. A
@@ -404,7 +413,9 @@ Sign in at `/` on the **Admin** tab (or `/admin/login`).
 - **Round Control** — start / end / reset each round, pick the hot seat, and the
   **Question Console**. While Round 2 is live, a **Lock in answer** panel shows
   the current question with A–D buttons — click one, then click it again to
-  confirm; the contestant's screen turns green/red instantly. Re-serve with
+  confirm; the contestant's screen turns green/red instantly. The **correct
+  option** is noted under the question from the moment it is served (R20), so
+  the host is not reading the answer off a printout. Re-serve with
   *Clear answers on serve* to replay a question.
   - **Serve** any question at any time, in any order.
   - **Manual mode** (turned on automatically the first time you serve) stops
