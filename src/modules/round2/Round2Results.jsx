@@ -10,7 +10,6 @@ import { clearedLevels, checkpointReached } from './checkpoints';
  * Displays:
  *   - What they take home
  *   - Total score
- *   - Per-question breakdown (correct/wrong, points, response time)
  *
  * R15 — the money leads. Points are the tournament's bookkeeping; the
  * number a contestant walks off with is the last guaranteed checkpoint they
@@ -25,8 +24,6 @@ import { clearedLevels, checkpointReached } from './checkpoints';
  *   eliminated — they were knocked out rather than reaching the end of the
  *                run, which is all that changes the wording
  */
-
-const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
 export default function Round2Results({ participant, questions, ladder = null, eliminated = false, onBack }) {
   const [myResponses, setMyResponses] = useState([]);
@@ -119,46 +116,15 @@ export default function Round2Results({ participant, questions, ladder = null, e
           </div>
           <div className="r2r-stat-divider" />
           <div className="r2r-stat">
+            {/* Against the ladder, not the question pool: the run is measured
+                in stages climbed, and a host who skips a question does not
+                shrink the climb. Falls back to the questions played when
+                there is no ladder to count. */}
             <span className="r2r-stat-value">
-              {myResponses.filter((r) => r.is_correct).length}/{questions.length}
+              {myResponses.filter((r) => r.is_correct).length}/{rungs.length || questions.length}
             </span>
             <span className="r2r-stat-label">Correct</span>
           </div>
-        </div>
-      </div>
-
-      {/* Question Breakdown */}
-      <div className="r2r-section">
-        <h3 className="r2r-section-title">Your Answers</h3>
-        <div className="r2r-breakdown">
-          {questions.map((q, i) => {
-            const resp = myResponses.find((r) => r.question_id === q.id);
-            return (
-              <div key={q.id} className="r2r-q-row">
-                <div className="r2r-q-header">
-                  <span className="r2r-q-num">{i + 1}</span>
-                  <span className="r2r-q-text">{q.text}</span>
-                  {resp ? (
-                    <span className={`badge ${resp.is_correct ? 'badge--correct' : 'badge--wrong'}`}>
-                      {resp.is_correct ? '✓ Correct' : '✗ Wrong'}
-                    </span>
-                  ) : (
-                    <span className="badge badge--pending">No Answer</span>
-                  )}
-                </div>
-                {resp && (
-                  <div className="r2r-q-detail">
-                    <span>Your answer: <strong>{OPTION_LABELS[resp.selected_option]}</strong></span>
-                    {!resp.is_correct && (
-                      <span>Correct: <strong>{OPTION_LABELS[q.correct_option]}</strong></span>
-                    )}
-                    <span>+{resp.points_awarded} pts</span>
-                    <span>{(resp.response_time_ms / 1000).toFixed(1)}s</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
       </div>
 
@@ -334,73 +300,6 @@ export default function Round2Results({ participant, questions, ladder = null, e
           background: rgba(245,166,35,0.3);
         }
 
-        /* Sections */
-        .r2r-section {
-          margin-bottom: var(--space-xl);
-        }
-
-        .r2r-section-title {
-          font-size: 18px;
-          margin-bottom: var(--space-md);
-          padding-bottom: var(--space-sm);
-          border-bottom: 1px solid rgba(245,166,35,0.2);
-          color: var(--warning-amber);
-        }
-
-        /* Question breakdown */
-        .r2r-breakdown {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-sm);
-        }
-
-        .r2r-q-row {
-          background: rgba(11,20,64,0.6);
-          border: 1px solid rgba(245,166,35,0.15);
-          border-radius: var(--radius-md);
-          padding: 14px 16px;
-        }
-
-        .r2r-q-header {
-          display: flex;
-          align-items: center;
-          gap: var(--space-sm);
-        }
-
-        .r2r-q-num {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 28px;
-          height: 28px;
-          font-size: 12px;
-          flex-shrink: 0;
-          background: var(--warning-amber);
-          color: var(--deep-midnight);
-          font-weight: 700;
-          border-radius: 4px;
-        }
-
-        .r2r-q-text {
-          flex: 1;
-          font-family: 'Inter', sans-serif;
-          font-size: 14px;
-          color: var(--cloud-white);
-          line-height: 1.4;
-        }
-
-        .r2r-q-detail {
-          margin-top: var(--space-sm);
-          padding-top: var(--space-sm);
-          border-top: 1px solid rgba(245,166,35,0.15);
-          display: flex;
-          gap: var(--space-lg);
-          flex-wrap: wrap;
-          font-family: 'Inter', sans-serif;
-          font-size: 13px;
-          color: var(--pale-gold);
-        }
-
         /* Footer */
         .r2r-footer {
           text-align: center;
@@ -418,14 +317,6 @@ export default function Round2Results({ participant, questions, ladder = null, e
 
           .r2r-stat-value {
             font-size: 22px;
-          }
-
-          .r2r-q-header {
-            flex-wrap: wrap;
-          }
-
-          .r2r-q-detail {
-            gap: var(--space-md);
           }
         }
       `}</style>

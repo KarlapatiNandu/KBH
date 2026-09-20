@@ -168,230 +168,211 @@ export default function QuestionCard({
 
   return (
     <>
-    <div className={`r2-qc-card ${showPoll ? 'r2-qc-card--poll' : ''} ${verdictPrize ? 'r2-qc-card--verdict' : ''}`}>
-      {/* Meta row */}
-      <div className="r2-qc-header">
-        <span className="r2-q-badge">{questionNumber}</span>
-        <span className="r2-qc-counter">
-          Question {questionNumber} of {totalQuestions}
-        </span>
-        <span className="r2-qc-points">{question.base_points} pts</span>
-      </div>
+      <div className={`r2-qc-card ${showPoll ? 'r2-qc-card--poll' : ''} ${verdictPrize ? 'r2-qc-card--verdict' : ''}`}>
+        {/* Meta row */}
+        <div className="r2-qc-header">
+          <span className="r2-q-badge">{questionNumber}</span>
+          <span className="r2-qc-counter">
+            Question {questionNumber} of {totalQuestions}
+          </span>
+          <span className="r2-qc-points">{question.base_points} pts</span>
+        </div>
 
-      {/* Prize for this question (R8) — the gold money bar with its rupee
+        {/* Prize for this question (R8) — the gold money bar with its rupee
           coin, as it sits above the question on the show
           (assets and references/question_styling2.png)
 
           R14 — and the way into the whole ladder, on the same line: what
           this question pays and what the climb pays are the same thought,
           and the contestant reaches for the second one from the first. */}
-      {(question.prize || onOpenLadder) && (
-        <div className="r2-prize-row">
-          {onOpenLadder && (
-            <button
-              type="button"
-              className="r2-ladder-btn"
-              onClick={onOpenLadder}
-              title="See the whole prize ladder and the lifelines you have left"
-            >
-              <svg className="r2-ladder-btn-icon" viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  d="M2 3.5h12M2 8h12M2 12.5h12"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-              Prize ladder
-            </button>
-          )}
+        {(question.prize || onOpenLadder) && (
+          <div className="r2-prize-row">
+            {onOpenLadder && (
+              <button
+                type="button"
+                className="r2-ladder-btn"
+                onClick={onOpenLadder}
+                title="See the whole prize ladder and the lifelines you have left"
+              >
+                <svg className="r2-ladder-btn-icon" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="M2 3.5h12M2 8h12M2 12.5h12"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Prize ladder
+              </button>
+            )}
 
-          {question.prize && (
-          <div className="r2-prize">
-            <div className="r2-hex r2-hex--prize">
-              <span className="r2-hex-inner">
-                <span className="r2-prize-value">{question.prize}</span>
-              </span>
-            </div>
-            <span className="r2-prize-coin" aria-hidden="true">
-              <svg viewBox="0 0 56 56">
-                <defs>
-                  <linearGradient id="r2CoinRim" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#F7E7A0" />
-                    <stop offset="50%" stopColor="#F2B705" />
-                    <stop offset="100%" stopColor="#A9822F" />
-                  </linearGradient>
-                  <radialGradient id="r2CoinFace" cx="50%" cy="20%" r="85%">
-                    <stop offset="0%" stopColor="#1d2f7d" />
-                    <stop offset="65%" stopColor="#12205e" />
-                    <stop offset="100%" stopColor="#070f33" />
-                  </radialGradient>
-                </defs>
-                <circle cx="28" cy="28" r="26" fill="url(#r2CoinFace)" stroke="url(#r2CoinRim)" strokeWidth="3" />
-                <circle cx="28" cy="28" r="20" fill="none" stroke="url(#r2CoinRim)" strokeWidth="1.5" opacity="0.7" />
-                <text
-                  x="28"
-                  y="29"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontFamily="'Poppins', sans-serif"
-                  fontSize="24"
-                  fontWeight="700"
-                  fill="url(#r2CoinRim)"
-                >
-                  ₹
-                </text>
-              </svg>
-            </span>
+            {question.prize && (
+              <div className="r2-prize">
+                <div className="r2-hex r2-hex--prize">
+                  <span className="r2-hex-inner">
+                    <span className="r2-prize-value">{question.prize}</span>
+                  </span>
+                </div>
+                <span className="r2-prize-coin" aria-hidden="true">
+                  <svg viewBox="0 0 56 56">
+                    <defs>
+                      <linearGradient id="r2CoinRim" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#F7E7A0" />
+                        <stop offset="50%" stopColor="#F2B705" />
+                        <stop offset="100%" stopColor="#A9822F" />
+                      </linearGradient>
+                      <radialGradient id="r2CoinFace" cx="50%" cy="20%" r="85%">
+                        <stop offset="0%" stopColor="#1d2f7d" />
+                        <stop offset="65%" stopColor="#12205e" />
+                        <stop offset="100%" stopColor="#070f33" />
+                      </radialGradient>
+                    </defs>
+                    <circle cx="28" cy="28" r="26" fill="url(#r2CoinFace)" stroke="url(#r2CoinRim)" strokeWidth="3" />
+                    <circle cx="28" cy="28" r="20" fill="none" stroke="url(#r2CoinRim)" strokeWidth="1.5" opacity="0.7" />
+                    <text
+                      x="28"
+                      y="29"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontFamily="'Poppins', sans-serif"
+                      fontSize="24"
+                      fontWeight="700"
+                      fill="url(#r2CoinRim)"
+                    >
+                      ₹
+                    </text>
+                  </svg>
+                </span>
+              </div>
+            )}
           </div>
-          )}
-        </div>
-      )}
+        )}
 
-      {/* R11 — the audience's verdict, once the host has published it. In
+        {/* R11 — the audience's verdict, once the host has published it. In
           the card's top-right corner on a wide board; in the flow here,
           above the question, once there is no corner left to put it in. */}
-      {showPoll && (
-        <AudiencePoll
-          votes={pollVotes}
-          labels={OPTION_LABELS.slice(0, pollVotes.length)}
-        />
-      )}
+        {showPoll && (
+          <AudiencePoll
+            votes={pollVotes}
+            labels={OPTION_LABELS.slice(0, pollVotes.length)}
+          />
+        )}
 
-      {/* Countdown dome, resting flat on the question bar's top rail */}
-      <div className="r2-timer-dock">
-        <TimerRing
-          startedAtMs={timerStartedAtMs}
-          durationMs={timerDurationMs}
-          onTimeUp={onTimeUp}
-          isPaused={timerPaused}
-        />
-      </div>
+        {/* Countdown dome, resting flat on the question bar's top rail */}
+        <div className="r2-timer-dock">
+          <TimerRing
+            startedAtMs={timerStartedAtMs}
+            durationMs={timerDurationMs}
+            onTimeUp={onTimeUp}
+            isPaused={timerPaused}
+          />
+        </div>
 
-      {/* Question bar
+        {/* Question bar
 
           R15 — on the reveal it goes out: the face shades to black, the
           question fades back behind it, and the price tag takes the middle
           of the board. The bar itself does not move, so nothing on the
           screen below it reflows while the room is looking at the tag. */}
-      <div className="r2-rail r2-rail--question">
-        <div className={`r2-hex r2-hex--question ${verdictPrize ? 'r2-hex--shaded' : ''}`}>
-          <div className="r2-hex-inner">
-            <p className="r2-q-text">{question.text}</p>
+        <div className="r2-rail r2-rail--question">
+          <div className={`r2-hex r2-hex--question ${verdictPrize ? 'r2-hex--shaded' : ''}`}>
+            <div className="r2-hex-inner">
+              <p className="r2-q-text">{question.text}</p>
+            </div>
           </div>
+
         </div>
 
-      </div>
-
-      {/* Lifelines — the rail of four badges, as on the show (R10). Null
+        {/* Lifelines — the rail of four badges, as on the show (R10). Null
           while the database has no lifeline_state to read, so an un-migrated
           setup shows the board it always did rather than four dead badges. */}
-      {lifelineStatuses && <LifelineBar statuses={lifelineStatuses} />}
+        {lifelineStatuses && <LifelineBar statuses={lifelineStatuses} />}
 
-      {/* Options — two rows of two, each row sharing one rail */}
-      <div className="r2-options-grid">
-        {[0, 1].map((row) => (
-          <div className="r2-rail r2-rail--options" key={row}>
-            {question.options.slice(row * 2, row * 2 + 2).map((option, i) => {
-              const index = row * 2 + i;
-              const struck = isStruck(index);
-              return (
-                <div className="r2-hex-slot" key={index}>
-                  <div className={getHexClass(index)}>
-                    <span className="r2-hex-inner">
-                      {/* A struck option leaves an empty bar behind — the
+        {/* Options — two rows of two, each row sharing one rail */}
+        <div className="r2-options-grid">
+          {[0, 1].map((row) => (
+            <div className="r2-rail r2-rail--options" key={row}>
+              {question.options.slice(row * 2, row * 2 + 2).map((option, i) => {
+                const index = row * 2 + i;
+                const struck = isStruck(index);
+                return (
+                  <div className="r2-hex-slot" key={index}>
+                    <div className={getHexClass(index)}>
+                      <span className="r2-hex-inner">
+                        {/* A struck option leaves an empty bar behind — the
                           same thing 50:50 does on the show. */}
-                      {!struck && (
-                        <span className="r2-hex-label">
-                          <span className="r2-pill-num">{OPTION_LABELS[index]}:</span>
-                          <span className="r2-qc-option-text">{option}</span>
-                        </span>
-                      )}
-                      {/* Feedback icon */}
-                      {!struck && showVerdict && index === question.correct_option && (
-                        <span className="r2-qc-feedback-icon">✓</span>
-                      )}
-                      {!struck && showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
-                        <span className="r2-qc-feedback-icon">✗</span>
-                      )}
-                    </span>
+                        {!struck && (
+                          <span className="r2-hex-label">
+                            <span className="r2-pill-num">{OPTION_LABELS[index]}:</span>
+                            <span className="r2-qc-option-text">{option}</span>
+                          </span>
+                        )}
+                        {/* Feedback icon */}
+                        {!struck && showVerdict && index === question.correct_option && (
+                          <span className="r2-qc-feedback-icon">✓</span>
+                        )}
+                        {!struck && showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
+                          <span className="r2-qc-feedback-icon">✗</span>
+                        )}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                );
+              })}
+            </div>
+          ))}
 
-        {/* The lifeline this question belongs to rides the crossing point of
+          {/* The lifeline this question belongs to rides the crossing point of
             the two option rows (assets and references/
             Chosen_lifeline_display.png). It comes up the moment the host
             picks it, before it is played — see chosenLifelineKey. */}
-        {chosenLifelineKey && (
-          <span
-            className="r2-chosen-lifeline"
-            role="img"
-            aria-label={`${lifelineLabel(chosenLifelineKey)} chosen`}
-            title={`${lifelineLabel(chosenLifelineKey)} chosen`}
-          >
-            <LifelineIcon lifelineKey={chosenLifelineKey} />
-          </span>
-        )}
-      </div>
+          {chosenLifelineKey && (
+            <span
+              className="r2-chosen-lifeline"
+              role="img"
+              aria-label={`${lifelineLabel(chosenLifelineKey)} chosen`}
+              title={`${lifelineLabel(chosenLifelineKey)} chosen`}
+            >
+              <LifelineIcon lifelineKey={chosenLifelineKey} />
+            </span>
+          )}
+        </div>
 
-      {/* The indicator a lifeline puts on this screen — while it is running,
+        {/* The indicator a lifeline puts on this screen — while it is running,
           and (R13) from the moment it is picked, since that is when the
           countdown stops. For the Audience Poll this is what is up while the
           room votes; the chart replaces it once the host ends the poll (R11).
           The phone lifelines put PhoneOverlay up over the whole board and
           this line sits underneath it. */}
-      {bannerKey && (
-        <div className={`r2-ll-banner ${bannerLive && lifelineHolding ? '' : 'r2-ll-banner--picked'}`}>
-          <span className="r2-ll-banner-badge">
-            <LifelineIcon lifelineKey={bannerKey} />
-          </span>
-          <span className="r2-ll-banner-text">
-            <strong>{lifelineLabel(bannerKey)}</strong>
-            <span>
-              {!bannerLive
-                ? 'Your clock is paused — the host is setting it up.'
-                : !lifelineHolding
-                  ? 'Time is up on this — your clock is running again.'
-                  : bannerKey === 'audience_poll'
-                    ? 'The audience is voting — your clock is paused.'
-                    : 'The question clock is paused while this runs.'}
+        {bannerKey && (
+          <div className={`r2-ll-banner ${bannerLive && lifelineHolding ? '' : 'r2-ll-banner--picked'}`}>
+            <span className="r2-ll-banner-badge">
+              <LifelineIcon lifelineKey={bannerKey} />
             </span>
-          </span>
-          <span className="r2-ll-banner-live">
-            {!bannerLive ? '● PICKED' : lifelineHolding ? '● LIVE' : '● TIME UP'}
-          </span>
-        </div>
-      )}
-
-      {/* Host-controlled: what the contestant should do now */}
-      {!showVerdict && (
-        <div className={`r2-qc-hint ${timeUp ? 'r2-qc-hint--timeup' : ''} ${selectedOption !== null ? 'r2-qc-hint--locked' : ''}`}>
-          {selectedOption !== null ? (
-            <>
-              <span className="r2-qc-hint-icon">🔒</span>
+            <span className="r2-ll-banner-text">
+              <strong>{lifelineLabel(bannerKey)}</strong>
               <span>
-                <strong>{OPTION_LABELS[selectedOption]}</strong> is locked in — hold tight for the answer
+                {!bannerLive
+                  ? 'Your clock is paused — the host is setting it up.'
+                  : !lifelineHolding
+                    ? 'Time is up on this — your clock is running again.'
+                    : bannerKey === 'audience_poll'
+                      ? 'The audience is voting — your clock is paused.'
+                      : 'The question clock is paused while this runs.'}
               </span>
-            </>
-          ) : timeUp ? (
-            <>
-              <span className="r2-qc-hint-icon">⏱</span>
-              <span>Time&rsquo;s up — waiting for the host</span>
-            </>
-          ) : (
-            <>
-              <span className="r2-qc-hint-icon">🎙</span>
-              <span>Say your answer out loud — the host will lock it in for you</span>
-            </>
-          )}
-        </div>
-      )}
+            </span>
+            <span className="r2-ll-banner-live">
+              {!bannerLive ? '● PICKED' : lifelineHolding ? '● LIVE' : '● TIME UP'}
+            </span>
+          </div>
+        )}
 
-      <style>{`
+        {/* Host-controlled: what the contestant should do now. Once the clock
+          has run out there is nothing to say here, so the hint drops away
+          rather than announcing the obvious back at the contestant. */}
+
+
+        <style>{`
         .r2-qc-card {
           --r2-hex-cut: 28px;   /* horizontal depth of the pointed ends */
           --r2-hex-border: 2px;
@@ -1043,11 +1024,6 @@ export default function QuestionCard({
           text-align: center;
         }
 
-        .r2-qc-hint--timeup {
-          border-color: rgba(232,135,30,0.5);
-          color: var(--warning-amber);
-        }
-
         .r2-qc-hint--locked {
           border-style: solid;
           border-color: var(--spotlight-gold);
@@ -1139,29 +1115,29 @@ export default function QuestionCard({
           }
         }
       `}</style>
-    </div>
+      </div>
 
-    {/* The money, over everything. It is out of the card on purpose: the
+      {/* The money, over everything. It is out of the card on purpose: the
         card fades back on the reveal, and a tag inside it would fade with
         it — this is the one thing on screen that must not. (R15) */}
-    {verdictPrize && (
-      <div
-        className={`r2-verdict-prize ${lastResult.is_correct ? 'r2-verdict-prize--won' : 'r2-verdict-prize--lost'}`}
-        role="status"
-        aria-live="polite"
-      >
-        <span className="r2-sr-only">
-          {lastResult.is_correct
-            ? `Correct — ${verdictPrize}`
-            : `Wrong — ${verdictPrize} lost`}
-        </span>
-        <PriceTag
-          label={verdictPrize}
-          tone={lastResult.is_correct ? 'green' : 'red'}
-          size="xl"
-        />
-      </div>
-    )}
+      {verdictPrize && (
+        <div
+          className={`r2-verdict-prize ${lastResult.is_correct ? 'r2-verdict-prize--won' : 'r2-verdict-prize--lost'}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="r2-sr-only">
+            {lastResult.is_correct
+              ? `Correct — ${verdictPrize}`
+              : `Wrong — ${verdictPrize} lost`}
+          </span>
+          <PriceTag
+            label={verdictPrize}
+            tone={lastResult.is_correct ? 'green' : 'red'}
+            size="xl"
+          />
+        </div>
+      )}
     </>
   );
 }

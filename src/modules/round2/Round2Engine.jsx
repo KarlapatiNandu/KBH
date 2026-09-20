@@ -820,7 +820,6 @@ export default function Round2Engine({ participant }) {
             </svg>
           </div>
           <h2 className="r2-waiting-title">Hot Seat</h2>
-          <p className="r2-status-text">Waiting for the host to start the round…</p>
           <div className="r2-pulse-dots">
             <span /><span /><span />
           </div>
@@ -964,16 +963,7 @@ export default function Round2Engine({ participant }) {
         )}
 
         {/* Manual mode: the host decides when the next question goes live (R5) */}
-        {gamePhase === 'held' && (
-          <div className="r2-transition r2-transition--held">
-            <p>
-              {revealed
-                ? 'Waiting for the host’s next question…'
-                : 'Time’s up,  waiting for the host’s next question…'}
-            </p>
-            <span className="r2-spinner" />
-          </div>
-        )}
+
       </div>
       <Round2Styles />
     </div>
