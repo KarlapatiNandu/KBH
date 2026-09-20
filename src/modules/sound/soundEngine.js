@@ -11,24 +11,38 @@ import { SOUNDS, SOUND_BY_ID } from './sounds';
  * that case the unlock happens the moment the screen mounts. Who is allowed to
  * make noise is not decided here — see useRound2Sound.
  *
- * HTMLAudioElement rather than WebAudio: the beds are 14–18 s MP3s, and the
- * small encoder-padding gap when one loops is inaudible under a suspense pad.
+ * HTMLAudioElement rather than WebAudio: the beds are 14–18 s MP3s, and one
+ * element each is enough as long as nothing waits on the file's own end —
+ * hence the music window below.
+ *
+ * R19 — nothing plays a whole file. Every clip declares where its sound
+ * actually starts and ends (`music` in sounds.js), because these were cut
+ * with up to a second of digital silence on the front and the back. A clip
+ * starts at its music, a loop goes back there the moment it reaches the end
+ * of the music, and a chained clip hands over at the same point. Left to the
+ * element's own `loop` the bed dropped the room into a second of nothing
+ * every fourteen seconds.
  */
 
 const FADE_MS = 250;
 const FADE_STEP_MS = 25;
 
+// How often a playing clip's position is checked against its loop / handover
+// point. Cheap, and well under the ~40 ms where a seam starts being heard.
+const WATCH_MS = 20;
+
 const audios = new Map(); // id -> HTMLAudioElement
 const fades = new Map(); // id -> interval id of a fade-out in flight
-
-// Clips a hold froze mid-play, to be picked up again by `resumeAll`.
-const paused = new Set();
+// id -> interval watching that clip's playhead for the end of its music. A
+// clip is either looping or handing over to the next, never both, so one
+// watcher per clip is all there is.
+const watchers = new Map();
 
 // Has the page had the user gesture the browser wants before it will play?
-let unlocked = typeof navigator !== 'undefined' && !!navigator.userActivation?.hasBeenActive;
+let unlocked = false;
 let armed = false;
-// The unlock pass runs once per page: a second one would "unlock" a clip a
-// hold has paused mid-play, and reset its position.
+// The unlock pass runs once per page: a second one would mute-play every clip
+// again, and a cue landing inside that window would come out silent.
 let elementsUnlocked = false;
 const listeners = new Set();
 
@@ -56,7 +70,45 @@ function cancelFade(id, a) {
   a.volume = 1;
 }
 
-function halt(a) {
+/** Where the sound is in the file: `[start, end]`, the whole file by default. */
+function music(id) {
+  return SOUND_BY_ID[id]?.music ?? [0, Infinity];
+}
+
+/**
+ * The element may not have its metadata yet on the very first play of the
+ * page, and a seek before that can throw. Worth nothing more than the clip
+ * starting where it would have started anyway.
+ */
+function seek(a, seconds) {
+  try {
+    a.currentTime = seconds;
+  } catch {
+    /* not loaded yet */
+  }
+}
+
+/** Call `onReach` once the clip's playhead passes `at`. */
+function watch(id, a, at, onReach) {
+  unwatch(id);
+  if (!Number.isFinite(at)) return;
+  watchers.set(
+    id,
+    setInterval(() => {
+      if (!a.paused && a.currentTime >= at) onReach();
+    }, WATCH_MS)
+  );
+}
+
+function unwatch(id) {
+  const timer = watchers.get(id);
+  if (timer === undefined) return;
+  clearInterval(timer);
+  watchers.delete(id);
+}
+
+function halt(id, a) {
+  unwatch(id);
   a.onended = null;
   a.pause();
   a.currentTime = 0;
@@ -81,24 +133,25 @@ const GESTURES = ['pointerdown', 'keydown', 'touchstart'];
  * Get the clips ready and unlock them at the first opportunity. Loads every
  * clip now, so the first cue does not wait on a download, then unlocks on the
  * spot if the page has already had a gesture, or on the first one it gets.
- * Returns a disposer. Safe to call from several places; only the first arms.
+ * Returns a disposer. Safe to call from several places, and again after an
+ * unlock: only the first call that finds the page still locked arms.
  */
 export function armUnlock() {
   SOUNDS.forEach(({ id }) => element(id));
 
-  if (armed) return () => {};
-  armed = true;
+  // Ask the browser rather than remembering: the tap that walked the
+  // contestant from the round list to the hot seat is activation this page
+  // already has, and it landed before anything here was listening for one.
+  // Reading it at arm time is what lets the board's first cue play on the
+  // screen it was opened on.
+  if (typeof navigator !== 'undefined' && navigator.userActivation?.hasBeenActive) unlock();
 
-  if (unlocked) {
-    unlockElements();
-    return () => {};
-  }
+  if (unlocked || armed) return () => {};
+  armed = true;
 
   const onGesture = () => {
     dispose();
-    unlockElements();
-    unlocked = true;
-    notify();
+    unlock();
   };
   const dispose = () => {
     GESTURES.forEach((type) => document.removeEventListener(type, onGesture, true));
@@ -106,6 +159,13 @@ export function armUnlock() {
   };
   GESTURES.forEach((type) => document.addEventListener(type, onGesture, true));
   return dispose;
+}
+
+function unlock() {
+  unlockElements();
+  if (unlocked) return;
+  unlocked = true;
+  notify();
 }
 
 /**
@@ -125,7 +185,7 @@ function unlockElements() {
     a.muted = true;
     a.play()
       .then(() => {
-        if (a.muted) halt(a);
+        if (a.muted) halt(id, a);
         a.muted = false;
       })
       .catch(() => {
@@ -139,34 +199,62 @@ function unlockElements() {
 export function play(id, { loop = false } = {}) {
   const a = element(id);
   if (!a) return;
+  const [from, to] = music(id);
   cancelFade(id, a);
-  paused.delete(id);
+  unwatch(id);
   a.onended = null;
   a.muted = false;
-  a.loop = loop;
-  a.currentTime = 0;
+  // R19 — the loop is the watcher's, not the element's: `loop` restarts at
+  // the file's end, which is a second of silence later and a second of
+  // silence earlier than the music.
+  a.loop = loop && !Number.isFinite(to);
+  seek(a, from);
   a.play().catch((err) => console.warn(`Sound "${id}" could not play:`, err.message));
+  if (!loop || a.loop) return;
+
+  watch(id, a, to, () => seek(a, from));
+  // A tab the browser has throttled can have its watcher wake late enough
+  // for the clip to run out. Pick the bed back up rather than leave the room
+  // in silence until the next cue.
+  a.onended = () => {
+    seek(a, from);
+    a.play().catch(() => {});
+  };
 }
 
-/** `id`, then `nextId` — looping if asked — the moment `id` ends. */
+/**
+ * `id`, then `nextId` — looping if asked — the moment `id`'s music ends.
+ * Not the moment the file ends: `question-sting` holds nearly a second of
+ * silence after its last note, and the bed under the question is not going
+ * to wait that out. The first clip is left to run its tail under the second;
+ * nothing of it is cut.
+ */
 export function playThen(id, nextId, { loopNext = false } = {}) {
   play(id);
   const a = element(id);
-  if (a) a.onended = () => play(nextId, { loop: loopNext });
+  if (!a) return;
+  const handover = () => {
+    unwatch(id);
+    a.onended = null;
+    play(nextId, { loop: loopNext });
+  };
+  a.onended = handover;
+  watch(id, a, music(id)[1], handover);
 }
 
 export function stop(id, { fade = true } = {}) {
   const a = audios.get(id);
-  paused.delete(id);
   if (!a || a.paused) {
-    if (a) halt(a);
+    if (a) halt(id, a);
     return;
   }
-  // Drop the chain now: a clip fading out must not hand over to the next.
+  // Drop the chain now: a clip fading out must not hand over to the next,
+  // and a bed fading out must not loop back to the top.
+  unwatch(id);
   a.onended = null;
   if (!fade) {
     cancelFade(id, a);
-    halt(a);
+    halt(id, a);
     return;
   }
   if (fades.has(id)) return;
@@ -180,14 +268,13 @@ export function stop(id, { fade = true } = {}) {
     if (n >= steps) {
       clearInterval(timer);
       fades.delete(id);
-      halt(a);
+      halt(id, a);
     }
   }, FADE_STEP_MS);
   fades.set(id, timer);
 }
 
 export function stopAll({ fade = true } = {}) {
-  paused.clear();
   audios.forEach((a, id) => stop(id, { fade }));
 }
 
@@ -195,27 +282,4 @@ export function stopAll({ fade = true } = {}) {
 export function playExclusive(id) {
   stopAll();
   play(id);
-}
-
-/**
- * Freeze whatever is playing, keeping its position — the sound's version of
- * the question clock being held. `resumeAll` picks it back up.
- */
-export function pauseAll() {
-  audios.forEach((a, id) => {
-    if (a.paused || fades.has(id)) return;
-    a.pause();
-    paused.add(id);
-  });
-}
-
-/** Returns false when there was nothing frozen to pick up. */
-export function resumeAll() {
-  if (paused.size === 0) return false;
-  paused.forEach((id) => {
-    const a = audios.get(id);
-    if (a) a.play().catch(() => {});
-  });
-  paused.clear();
-  return true;
 }
