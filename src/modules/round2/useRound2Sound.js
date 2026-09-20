@@ -15,12 +15,18 @@ import { engine, openSoundChannel, QUESTION_SUSPENSE } from '../sound';
  *   reveal-right / reveal-wrong  the host revealed the verdict
  *   locked                       an answer is in, the verdict is not
  *   poll                         the Audience Poll is live
+ *   staged                       (R18) the question is up alone; the options
+ *                                and the clock have not been released yet
  *   silent                       the question is over, or waiting on the host
  *   hold                         a lifeline has the question clock stopped
  *   question                     the question is live and the clock is running
  *
  * `hold` pauses the bed and `question` picks it up where it stopped, so the
  * sound freezes and resumes exactly with the countdown.
+ *
+ * A staged question (R18) gets its sting when it goes up and then nothing:
+ * the bed belongs to the clock, so it starts when the host releases the
+ * options, and the sting is left to finish rather than being cut.
  *
  * The host's soundboard (SoundBoard.jsx) reaches this same device over the
  * `kbh-sfx` channel: a press plays that clip on its own, over anything else.
@@ -31,6 +37,7 @@ import { engine, openSoundChannel, QUESTION_SUSPENSE } from '../sound';
  *   boardActive the live board is on screen (not loading / waiting / results)
  *   serveKey    `${question.id}:${question_started_at}`, null between questions
  *   settled     the first read of this serve's response has come back
+ *   optionsHidden the live question is staged and its options are still withheld
  *   pollLive    the Audience Poll is running right now
  *   answerLocked / revealed / isCorrect   the response, as this screen sees it
  *   hold        a pick or the poll's chart has the question clock stopped
@@ -40,6 +47,7 @@ export default function useRound2Sound({
   isHotSeat,
   boardActive,
   serveKey,
+  optionsHidden,
   settled,
   pollLive,
   answerLocked,
@@ -79,11 +87,13 @@ export default function useRound2Sound({
       ? 'locked'
       : pollLive
         ? 'poll'
-        : silent
-          ? 'silent'
-          : hold
-            ? 'hold'
-            : 'question';
+        : optionsHidden
+          ? 'staged'
+          : silent
+            ? 'silent'
+            : hold
+              ? 'hold'
+              : 'question';
 
   const live = speaker && isHotSeat && boardActive;
   const stateRef = useRef(null);
@@ -127,8 +137,15 @@ export default function useRound2Sound({
 
       s.track = pickSuspense(s.lastTrack);
       s.lastTrack = s.track;
-      engine.playThen('question-sting', s.track, { loopNext: true });
-      s.cue = 'question';
+      if (optionsHidden) {
+        // Staged: the sting for the question going up, and the bed waits for
+        // the clock.
+        engine.play('question-sting');
+        s.cue = 'staged';
+      } else {
+        engine.playThen('question-sting', s.track, { loopNext: true });
+        s.cue = 'question';
+      }
     }
 
     if (s.hydrating) {
@@ -143,7 +160,7 @@ export default function useRound2Sound({
     const from = s.cue;
     s.cue = cue;
     transition(from, cue, s);
-  }, [live, serveKey, settled, cue]);
+  }, [live, serveKey, optionsHidden, settled, cue]);
 }
 
 // Random, but never the bed the previous question had.
@@ -157,6 +174,13 @@ function transition(from, to, s) {
 
   switch (to) {
     case 'question':
+      // Options just released on a staged question: the bed starts under the
+      // clock, and the sting from the question going up is not cut for it.
+      if (from === 'staged') {
+        s.track ??= pickSuspense(s.lastTrack);
+        engine.play(s.track, { loop: true });
+        break;
+      }
       // Out of a hold or the poll: the bed the clock froze under picks up
       // where it stopped. Out of anything else (a cleared answer) it starts
       // again — there is no sting to replay, the question is not new.
@@ -173,6 +197,12 @@ function transition(from, to, s) {
     case 'poll':
       engine.pauseAll();
       engine.play('suspense-poll', { loop: true });
+      break;
+
+    case 'staged':
+      // Only reached by a state change on a question already up (the sting
+      // itself is started by the serve branch above).
+      engine.stopAll();
       break;
 
     case 'silent':

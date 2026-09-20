@@ -15,20 +15,27 @@ import { supabase } from '../../lib/supabase';
  * running out reveals nothing on its own, so the host can hold the moment
  * for as long as the room needs it.
  *
+ * R18 — above the first checkpoint a question is served alone (staged): the
+ * host reads it out, then releases the options and the clock from here.
+ * Until they do there is nothing on the contestant's screen to lock an answer
+ * into, so the option buttons stay off.
+ *
  * Props:
  *   roundState — the round 2 round_state row
  *   questions  — round 2 questions incl. options + correct_option
  *   hotSeat    — the nominated participant ({id, roll_no, name}) or null
  *   onResult(message, type) — toast callback owned by the parent
+ *   onChanged() — refetch hint after a write
  */
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
-export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onResult }) {
+export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onResult, onChanged }) {
   const [response, setResponse] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(null);
   const [revealing, setRevealing] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   // Set when the database cannot carry a reveal yet (migration_v6 unrun) or
   // the last read of the answer row failed — see the warning line below.
   const [revealBlocked, setRevealBlocked] = useState(null);
@@ -130,6 +137,22 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
     );
   };
 
+  // R18 — put the options and the clock up on the contestant's screen.
+  const releaseOptions = async () => {
+    setReleasing(true);
+    const { data, error } = await supabase.rpc('reveal_options');
+    setReleasing(false);
+
+    if (error || !data?.success) {
+      onResult(error?.message || data?.error || 'Failed to reveal the options', 'error');
+      onChanged?.();
+      return;
+    }
+
+    onResult('Options and timer are up');
+    onChanged?.();
+  };
+
   // R9 — show the verdict on the contestant's screen, on the host's cue.
   const reveal = async () => {
     setRevealing(true);
@@ -182,6 +205,11 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
   const locked = response !== null;
   const revealed = locked && !!response.revealed_at;
 
+  // R18 — staged, and the host has not released the options yet. Once an
+  // answer is locked the options are by definition out.
+  const awaitingOptions =
+    !!roundState?.options_staged && !roundState?.options_revealed_at && !locked;
+
   return (
     <div className="hsa">
       <div className="hsa-head">
@@ -200,6 +228,23 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
 
       <p className="hsa-question">{liveQuestion.text}</p>
 
+      {awaitingOptions && (
+        <div className="hsa-stage">
+          <span className="hsa-stage-text">
+            Only the question is on their screen. Read it out, then bring up the
+            options — the clock starts with them.
+          </span>
+          <button
+            className="hsa-reveal"
+            onClick={releaseOptions}
+            disabled={releasing}
+            title="Show the four options and start the countdown on the contestant’s screen"
+          >
+            {releasing ? 'Revealing…' : '👁 Reveal options'}
+          </button>
+        </div>
+      )}
+
       <div className="hsa-options">
         {liveQuestion.options.map((option, index) => {
           const isCorrect = index === liveQuestion.correct_option;
@@ -217,7 +262,7 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
             <button
               key={index}
               className={cls}
-              disabled={locked || busy}
+              disabled={locked || busy || awaitingOptions}
               onClick={() => (confirming === index ? lockIn(index) : setConfirming(index))}
               title={locked ? undefined : confirming === index ? 'Click again to lock in' : `Lock in ${OPTION_LABELS[index]}`}
             >
@@ -271,7 +316,11 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
             <button className="hsa-cancel" onClick={() => setConfirming(null)}>cancel</button>
           </span>
         ) : (
-          <span className="hsa-pending">Waiting for the contestant to say their answer…</span>
+          <span className="hsa-pending">
+            {awaitingOptions
+              ? 'Waiting for you to reveal the options…'
+              : 'Waiting for the contestant to say their answer…'}
+          </span>
         )}
 
         {revealBlocked && <p className="hsa-warning">{revealBlocked}</p>}
@@ -338,6 +387,28 @@ export default function HotSeatAnswerPanel({ roundState, questions, hotSeat, onR
           font-family: 'Poppins', sans-serif;
           font-size: 13px;
           font-weight: 600;
+          color: var(--pale-gold);
+        }
+
+        /* R18 — the staged question's release. Same gold button as the answer
+           reveal (it is the same kind of beat), with its cue beside it. */
+        .hsa-stage {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-md);
+          flex-wrap: wrap;
+          margin-bottom: var(--space-md);
+          padding: 10px 12px;
+          border-radius: var(--radius-sm);
+          border: 1px dashed rgba(242,183,5,0.5);
+          background: rgba(242,183,5,0.08);
+        }
+
+        .hsa-stage-text {
+          flex: 1 1 200px;
+          font-size: 12px;
+          line-height: 1.5;
           color: var(--pale-gold);
         }
 

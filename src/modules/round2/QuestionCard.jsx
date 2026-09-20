@@ -33,6 +33,10 @@ import { lifelineLabel } from './lifelines';
  *                     is docked on the question bar rather than floating
  *                     above the card (assets and references/round2_timer.png)
  *
+ * R18 — `optionsHidden` is a staged question waiting on the host: only the
+ * question is up. The options and the countdown dome are held back (their
+ * space is kept) until the host releases them.
+ *
  * R10 — lifelines. The rail of four badges under the question bar is
  * LifelineBar (assets and references/Lifeline.png), and whichever lifeline
  * the host has picked rides the crossing point of the option rows as a
@@ -107,6 +111,7 @@ export default function QuestionCard({
   pollVotes = null,
   onOpenLadder = null,
   prizeLabel = null,
+  optionsHidden = false,
 }) {
   // The lock-in shows immediately; the verdict waits for the reveal.
   const showVerdict = revealed && lastResult !== null;
@@ -260,12 +265,18 @@ export default function QuestionCard({
 
         {/* Countdown dome, resting flat on the question bar's top rail */}
         <div className="r2-timer-dock">
-          <TimerRing
-            startedAtMs={timerStartedAtMs}
-            durationMs={timerDurationMs}
-            onTimeUp={onTimeUp}
-            isPaused={timerPaused}
-          />
+          {/* R18 — a staged question has no clock until the host releases the
+            options. The dock stays, so the question bar does not jump when
+            the dome arrives; the ring mounts fresh on release, which is also
+            what starts it from the full time. */}
+          {!optionsHidden && (
+            <TimerRing
+              startedAtMs={timerStartedAtMs}
+              durationMs={timerDurationMs}
+              onTimeUp={onTimeUp}
+              isPaused={timerPaused}
+            />
+          )}
         </div>
 
         {/* Question bar
@@ -289,7 +300,10 @@ export default function QuestionCard({
         {lifelineStatuses && <LifelineBar statuses={lifelineStatuses} />}
 
         {/* Options — two rows of two, each row sharing one rail */}
-        <div className="r2-options-grid">
+        <div
+          className={`r2-options-grid ${optionsHidden ? 'r2-options-grid--hidden' : ''}`}
+          aria-hidden={optionsHidden || undefined}
+        >
           {[0, 1].map((row) => (
             <div className="r2-rail r2-rail--options" key={row}>
               {question.options.slice(row * 2, row * 2 + 2).map((option, i) => {
@@ -669,6 +683,22 @@ export default function QuestionCard({
         .r2-rail--options {
           grid-template-columns: 1fr 1fr;
           column-gap: var(--space-xl);
+        }
+
+        /* R18 — a staged question's options wait for the host. They hold
+           their place so the board does not reflow, and fade in on release. */
+        .r2-options-grid--hidden {
+          visibility: hidden;
+          opacity: 0;
+        }
+
+        .r2-options-grid:not(.r2-options-grid--hidden) {
+          animation: r2OptionsIn 0.6s ease both;
+        }
+
+        @keyframes r2OptionsIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: none; }
         }
 
         .r2-options-grid {

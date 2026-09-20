@@ -211,6 +211,7 @@ export default function Round2Panel({
         questions={questions}
         hotSeat={hotSeat}
         onResult={onResult}
+        onChanged={onChanged}
       />
 
       <LifelinePanel

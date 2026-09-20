@@ -271,7 +271,7 @@ names, from `assets and references/sound_effects/`).
 
   | Moment | Sound |
   |---|---|
-  | Question goes live | question sting, then a suspense bed (2 or 3, picked at random, never the same twice running) looping under the clock |
+  | Question goes live | question sting, then a suspense bed (2 or 3, picked at random, never the same twice running) looping under the clock. A staged question (R18) gets the sting alone; the bed starts when the host reveals the options |
   | Lifeline picked / Audience Poll chart up | the bed pauses with the clock and resumes with it |
   | Audience Poll live | poll suspense (suspense 1) |
   | Host locks the answer | lock sting, then the after-lock suspense until the reveal |
@@ -286,6 +286,34 @@ names, from `assets and references/sound_effects/`).
   press plays over whatever is running; the show's own cues take over again at
   the next lock-in or serve. The dock's status line says whether a speaker is
   actually listening, so a muted contestant screen shows up before the show does.
+
+**Staged option reveal (R18):** run `supabase/migration_v12.sql`, then re-run
+`supabase/rpcs.sql`. Up to the first checkpoint a question goes up with its
+options and clock together, as before. Above it, the question goes up **alone**:
+the contestant sees only the question, the host reads it out, and the four
+options and the countdown appear together when the host clicks **Reveal
+options**.
+
+- **Which questions:** every rung above the first guaranteed (✦) rung on the
+  prize ladder is staged by default; that rung and the ones below it are not.
+  Questions the rule will stage carry a **staged** tag in the console.
+- **Override:** the **Options** control in the question console's toolbar —
+  *Auto* (the rule), *Staged* or *Together* — forces the **next serve only**,
+  then falls back to *Auto*, so a rehearsal override cannot be left on into
+  the show.
+- **Reveal options** is the gold button in the hot seat panel, shown while the
+  live question is waiting on its options. Until it is clicked the four answer
+  buttons are off (`host_submit_answer` refuses too: *Reveal the options
+  first*).
+- **The clock** starts when the options land, on the contestant's own device,
+  and the response time behind an answer is measured from the same moment — the
+  reading time is not taken out of their answer window.
+- **Sound:** the question sting plays when the question goes up, and the
+  suspense bed starts with the clock when the options are released. The sting
+  is left to finish rather than being cut.
+- Serving, advancing, starting and resetting all clear the staged state, so it
+  can never outlive its question. A database that has not run the migration
+  serves every question the old way, and the console says so.
 
 ### 3. Admin account
 

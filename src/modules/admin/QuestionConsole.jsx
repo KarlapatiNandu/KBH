@@ -15,6 +15,14 @@ import { supabase } from '../../lib/supabase';
  * and gets the flat list it has always had: it is one synchronized race down
  * a fixed order, and there is no ladder in it to group by.
  *
+ * R18 — above the first checkpoint a question is served alone: the contestant
+ * sees only the question, and the options and clock wait for the host's
+ * **Reveal options** (HotSeatAnswerPanel). Which questions that covers is
+ * the ladder's doing — every rung above the first guaranteed one — and the
+ * Options control in the toolbar overrides it for the next serve only, then
+ * falls back to the rule, so a rehearsal override cannot be left on into the
+ * show.
+ *
  * Serving out of turn is still allowed — it asks first. The host is the one
  * in the room, and a tier gate that cannot be overridden is a gate that
  * strands a show.
@@ -38,6 +46,8 @@ const ALL_CLOSED = '__closed__';
 export default function QuestionConsole({ round, roundState, questions, tiers = null, onResult, onChanged }) {
   const [busyId, setBusyId] = useState(null);
   const [clearOnServe, setClearOnServe] = useState(false);
+  // R18 — 'auto' follows the rung rule; the other two force this one serve.
+  const [revealMode, setRevealMode] = useState('auto');
   // Which tier the host has opened by hand. null means "follow the run" —
   // the tier it is standing on, which is what they want opened nine times
   // out of ten and is why this resets every time the run moves up.
@@ -52,16 +62,40 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
 
   const activeLevel = tiers?.activeLevel ?? null;
 
+  // R18 — a database without migration_v12 has no such column on round_state,
+  // and serve_question there does not know the parameter: staging is offered
+  // only where it can work.
+  const stagingAvailable = round === 2 && !!roundState && 'options_staged' in roundState;
+
+  // The lowest guaranteed rung. Everything above it is staged by default;
+  // no milestone on the ladder means nothing is.
+  const milestoneLevels = (tiers?.tiers || []).filter((t) => t.is_milestone).map((t) => t.level);
+  const firstCheckpoint = milestoneLevels.length > 0 ? Math.min(...milestoneLevels) : null;
+
+  const tierOf = (question) =>
+    tiers?.tiers.find((t) => t.questions.some((q) => q.id === question.id)) || null;
+
+  const willStage = (tier) => {
+    if (!stagingAvailable) return false;
+    if (revealMode !== 'auto') return revealMode === 'staged';
+    return firstCheckpoint !== null && tier?.level != null && tier.level > firstCheckpoint;
+  };
+
   useEffect(() => {
     setOpenKey(FOLLOW_RUN);
   }, [activeLevel]);
 
-  const serve = async (question) => {
+  const serve = async (question, tier = tierOf(question)) => {
+    const staged = willStage(tier);
+
     setBusyId(question.id);
     const { data, error } = await supabase.rpc('serve_question', {
       p_round: round,
       p_question_id: question.id,
       p_clear_responses: clearOnServe,
+      // Only sent when staging: a serve that is not staged keeps working on a
+      // database whose serve_question has not been replaced yet.
+      ...(staged ? { p_staged: true } : {}),
     });
     setBusyId(null);
 
@@ -70,13 +104,17 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
       return;
     }
 
+    // One serve only — see the header.
+    setRevealMode('auto');
+
     const cleared = data.cleared_responses
       ? ` (${data.cleared_responses} previous ${data.cleared_responses === 1 ? 'response' : 'responses'} cleared)`
       : '';
+    const stagedNote = staged ? ' — options staged, reveal them when ready' : '';
     onResult(
-      tiers
+      (tiers
         ? `Serving for ${question.ladder_level != null ? `rung ${question.ladder_level}` : 'an unfiled question'}${cleared}`
-        : `Serving question ${questions.findIndex((q) => q.id === question.id) + 1}${cleared}`
+        : `Serving question ${questions.findIndex((q) => q.id === question.id) + 1}${cleared}`) + stagedNote
     );
     onChanged?.();
   };
@@ -88,7 +126,7 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
    * meant to click, so it asks.
    */
   const serveFromTier = (question, tier) => {
-    if (!tier || tier.status === 'active') return serve(question);
+    if (!tier || tier.status === 'active') return serve(question, tier);
 
     const what =
       tier.status === 'cleared'
@@ -98,7 +136,7 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
           : `The run is standing on rung ${activeLevel ?? '—'}. Serving this jumps it to rung ` +
             `${tier.level} (${tier.label}) and skips everything in between. Continue?`;
 
-    if (window.confirm(what)) serve(question);
+    if (window.confirm(what)) serve(question, tier);
   };
 
   const toggleManual = async () => {
@@ -145,6 +183,14 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
         <span className="qc-num">{tier ? (answered ? '✓' : i + 1) : i + 1}</span>
         <span className="qc-text" title={q.text}>{q.text}</span>
         <span className="qc-points">{q.base_points} pts</span>
+        {willStage(tier) && (
+          <span
+            className="qc-stage-badge"
+            title="Served alone — the options and clock wait for Reveal options"
+          >
+            staged
+          </span>
+        )}
         {isLive && <span className="badge badge--active qc-live-badge">LIVE</span>}
         <button
           className={`btn btn-sm ${isLive || (tier && tier.status !== 'active') ? 'btn-secondary' : 'btn-primary'}`}
@@ -331,7 +377,40 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
           />
           Clear answers on serve
         </label>
+
+        {/* R18 — only Round 2 has a staged reveal, and only once the database can
+            carry one. */}
+        {stagingAvailable && (
+          <div className="qc-reveal" role="group" aria-label="Options reveal for the next serve">
+            <span className="qc-reveal-label">Options</span>
+            {[
+              ['auto', 'Auto', 'Staged above the first checkpoint, together below it'],
+              ['staged', 'Staged', 'Question first; you reveal the options and clock'],
+              ['together', 'Together', 'Question, options and clock at once'],
+            ].map(([mode, label, hint]) => (
+              <button
+                key={mode}
+                type="button"
+                className={`qc-reveal-btn ${revealMode === mode ? 'qc-reveal-btn--on' : ''}`}
+                aria-pressed={revealMode === mode}
+                title={`${hint} — applies to the next serve only`}
+                onClick={() => setRevealMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {round === 2 && tiers && !!roundState && !stagingAvailable && firstCheckpoint !== null && (
+        <div className="qc-note">
+          Staged option reveal needs the database migration — run
+          {' '}<code>supabase/migration_v12.sql</code>, then re-run{' '}
+          <code>supabase/rpcs.sql</code>. Until then every question serves
+          with its options and clock together.
+        </div>
+      )}
 
       {tiers ? renderTiers() : (
         <>
@@ -460,6 +539,49 @@ export default function QuestionConsole({ round, roundState, questions, tiers = 
           font-size: 12px;
           color: var(--pale-gold);
           cursor: pointer;
+        }
+
+        .qc-reveal {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .qc-reveal-label {
+          margin-right: 4px;
+          font-size: 12px;
+          color: var(--pale-gold);
+        }
+
+        .qc-reveal-btn {
+          padding: 3px 10px;
+          border-radius: var(--radius-pill);
+          border: 1px solid rgba(242,183,5,0.25);
+          background: transparent;
+          color: var(--pale-gold);
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .qc-reveal-btn:hover { border-color: var(--spotlight-gold); color: var(--cloud-white); }
+
+        .qc-reveal-btn--on {
+          border-color: var(--spotlight-gold);
+          background: rgba(242,183,5,0.16);
+          color: var(--spotlight-gold);
+        }
+
+        .qc-stage-badge {
+          flex-shrink: 0;
+          padding: 1px 8px;
+          border-radius: var(--radius-pill);
+          border: 1px solid rgba(242,183,5,0.4);
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--spotlight-gold);
         }
 
         .qc-steppers {

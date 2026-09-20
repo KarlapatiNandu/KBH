@@ -75,7 +75,11 @@ CREATE TABLE IF NOT EXISTS round_state (
   manual_mode             BOOLEAN NOT NULL DEFAULT false,
   -- One authoritative question duration, shared by the client timer and
   -- the server-side clamp in submit_response (ISSUES 3.4)
-  question_duration_ms    INT NOT NULL DEFAULT 10000
+  question_duration_ms    INT NOT NULL DEFAULT 10000,
+  -- Round 2: the live question was served with its options and countdown
+  -- withheld until the host releases them (R18)
+  options_staged          BOOLEAN NOT NULL DEFAULT false,
+  options_revealed_at     TIMESTAMPTZ
 );
 
 -- ─── responses ──────────────────────────────────────────────

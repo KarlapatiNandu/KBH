@@ -12,6 +12,8 @@
 -- Signatures changed in v2 — drop the old ones so we replace rather than
 -- overload them.
 DROP FUNCTION IF EXISTS submit_response(UUID, UUID, INT);
+-- v12 adds p_staged to serve_question. (R18)
+DROP FUNCTION IF EXISTS serve_question(INT, UUID, BOOLEAN);
 
 -- ─── network_ping ───────────────────────────────────────────
 -- Cheapest possible authenticated-free round trip. Used by the
@@ -163,7 +165,11 @@ BEGIN
     -- (ISSUES 1.1)
     v_response_time := LEAST(
       GREATEST(
-        (EXTRACT(EPOCH FROM (now() - v_round_state.question_started_at)) * 1000)::INT,
+        -- R18 — a staged question's clock starts when the host releases the
+        -- options, not when the question went up for reading.
+        (EXTRACT(EPOCH FROM (
+          now() - COALESCE(v_round_state.options_revealed_at, v_round_state.question_started_at)
+        )) * 1000)::INT,
         0
       ),
       v_duration
@@ -238,6 +244,12 @@ BEGIN
 
   IF p_selected_option IS NULL OR p_selected_option < 0 OR p_selected_option > 3 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Option must be 0–3');
+  END IF;
+
+  -- R18 — a staged question has no options on the contestant's screen yet,
+  -- so there is nothing to lock an answer into.
+  IF v_round_state.options_staged AND v_round_state.options_revealed_at IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Reveal the options first');
   END IF;
 
   -- Transaction-local: submit_response reads this to allow the round 2 write.
@@ -316,6 +328,44 @@ END;
 $$;
 
 
+-- ─── reveal_options ─────────────────────────────────────────
+-- Releases a staged question's options and countdown on the contestant's
+-- screen. (R18) The question was served alone (serve_question with
+-- p_staged), the host has read it out, and this is the beat where the four
+-- options and the clock appear together.
+--
+-- Idempotent: releasing twice keeps the first stamp, so a double-click
+-- cannot re-time the clock. Refuses a question that was not staged — there
+-- is nothing withheld to release, and saying so beats a button that
+-- appears to work.
+CREATE OR REPLACE FUNCTION reveal_options()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_revealed_at TIMESTAMPTZ;
+BEGIN
+  UPDATE round_state
+  SET options_revealed_at = COALESCE(options_revealed_at, now())
+  WHERE round = 2
+    AND status = 'active'
+    AND options_staged
+  RETURNING options_revealed_at INTO v_revealed_at;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'The live question is not waiting on its options'
+    );
+  END IF;
+
+  RETURN jsonb_build_object('success', true, 'options_revealed_at', v_revealed_at);
+END;
+$$;
+
+
 -- ─── advance_question ───────────────────────────────────────
 -- Called by a participant client when its local countdown hits zero.
 -- Atomic WHERE clause means only the first caller actually advances.
@@ -376,7 +426,9 @@ BEGIN
   -- Advance to next question (atomic — only first caller succeeds)
   UPDATE round_state
   SET current_question_index = v_next_order,
-      question_started_at = now()
+      question_started_at = now(),
+      options_staged = false,
+      options_revealed_at = NULL
   WHERE round = p_round
     AND status = 'active'
     AND current_question_index = v_current_index;
@@ -411,7 +463,10 @@ $$;
 CREATE OR REPLACE FUNCTION serve_question(
   p_round            INT,
   p_question_id      UUID,
-  p_clear_responses  BOOLEAN DEFAULT false
+  p_clear_responses  BOOLEAN DEFAULT false,
+  -- R18 — put the question up alone; the options and the clock wait for
+  -- reveal_options().
+  p_staged           BOOLEAN DEFAULT false
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -441,7 +496,9 @@ BEGIN
   SET status                 = 'active',
       manual_mode            = true,
       current_question_index = v_question.order_index,
-      question_started_at    = now()
+      question_started_at    = now(),
+      options_staged         = COALESCE(p_staged, false),
+      options_revealed_at    = NULL
   WHERE round = p_round;
 
   GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
@@ -462,7 +519,8 @@ BEGIN
     'round', p_round,
     'question_id', p_question_id,
     'order_index', v_question.order_index,
-    'cleared_responses', v_cleared
+    'cleared_responses', v_cleared,
+    'staged', COALESCE(p_staged, false)
   );
 END;
 $$;
@@ -562,7 +620,9 @@ BEGIN
   UPDATE round_state
   SET status                 = 'inactive',
       current_question_index = v_first_index,
-      question_started_at    = NULL
+      question_started_at    = NULL,
+      options_staged         = false,
+      options_revealed_at    = NULL
   WHERE round = p_round;
 
   GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
@@ -712,6 +772,8 @@ BEGIN
   SET status = 'active',
       current_question_index = v_first_index,
       question_started_at = now(),
+      options_staged = false,
+      options_revealed_at = NULL,
       active_participant_id = COALESCE(p_active_participant_id, active_participant_id)
   WHERE round = p_round;
 

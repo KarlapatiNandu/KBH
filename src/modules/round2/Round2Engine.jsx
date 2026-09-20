@@ -628,6 +628,33 @@ export default function Round2Engine({ participant }) {
   // run out from under an answer that is already in.
   const answerLocked = selectedOption !== null;
 
+  // R18 — a staged question is served alone: the host reads it out, and the
+  // options and the clock arrive together when they release them. Nothing
+  // withheld once an answer exists (an answer can only exist for options that
+  // were shown), and none of it applies on a database without migration_v12.
+  const optionsStaged = !!roundState?.options_staged;
+  const optionsRevealedAt = roundState?.options_revealed_at || null;
+  const optionsHidden = optionsStaged && !optionsRevealedAt && !answerLocked;
+
+  // The clock starts on this device's own clock at the moment the options
+  // land, exactly as it does for an ordinary serve (R6) — the reading time
+  // before it must not come out of the contestant's answer window.
+  const optionsShownKey =
+    optionsStaged && optionsRevealedAt && servedKey ? `${servedKey}:${optionsRevealedAt}` : null;
+  const [anchoredShownKey, setAnchoredShownKey] = useState(null);
+  useEffect(() => {
+    if (!optionsShownKey) return;
+    setQuestionAnchor(Date.now());
+    setAnchoredShownKey(optionsShownKey);
+  }, [optionsShownKey]);
+
+  // What the board acts on: the options stay withheld for the one render
+  // between the host releasing them and the clock being re-anchored above.
+  // Without that beat the dome would mount against the serve-time anchor, see
+  // all the reading time as elapsed, and call time up before it drew a frame.
+  const boardOptionsHidden =
+    optionsHidden || (optionsShownKey !== null && anchoredShownKey !== optionsShownKey);
+
   // ─── Lifelines (R10) ────────────────────────────────────────
   // Everything below is scoped to the live question: a lifeline row keeps its
   // question_id after it is spent, which is exactly what stops a 50:50 struck
@@ -773,6 +800,7 @@ export default function Round2Engine({ participant }) {
         gamePhase === 'held' ||
         gamePhase === 'eliminated'),
     serveKey: servedKey,
+    optionsHidden,
     settled: settledKey === servedKey,
     pollLive: activeLifeline?.key === 'audience_poll',
     answerLocked,
@@ -936,6 +964,7 @@ export default function Round2Engine({ participant }) {
                 // the host hides its result.
                 timerPaused={
                   answerLocked ||
+                  boardOptionsHidden ||
                   pickHolding ||
                   pollHolding ||
                   gamePhase === 'transition' ||
@@ -953,6 +982,8 @@ export default function Round2Engine({ participant }) {
                 onOpenLadder={ladder.length > 0 ? () => setLadderOpen(true) : null}
                 // R15 — what the reveal puts on the blacked-out question.
                 prizeLabel={currentPrizeLabel}
+                // R18 — a staged question waiting on the host: question only.
+                optionsHidden={boardOptionsHidden}
               />
             ) : (
               <div className="r2-center">
