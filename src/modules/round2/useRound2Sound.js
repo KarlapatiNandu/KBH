@@ -30,10 +30,17 @@ import { engine, openSoundChannel, QUESTION_SUSPENSE } from '../sound';
  *
  * The host's soundboard (SoundBoard.jsx) reaches this same device over the
  * `kbh-sfx` channel: a press plays that clip on its own, over anything else.
- * A device that has not been made a speaker (SoundToggle) ignores all of it.
+ *
+ * Sound is always on — there is no switch. The one thing that decides whether
+ * a screen makes noise is whether it is the hot seat's: every participant with
+ * the Round 2 page open hears the same broadcasts, and only the nominated
+ * contestant's screen is the one the room is watching. The other gate is the
+ * browser's own: nothing can play until the page has had a click, key press or
+ * tap, which the engine waits for on its own (see armUnlock). Until then the
+ * hook stays quiet rather than firing cues that would be refused.
  *
  * Args — all derived by Round2Engine:
- *   isHotSeat   this device is the nominated contestant's board
+ *   isHotSeat   this device is the nominated contestant's screen — the speaker
  *   boardActive the live board is on screen (not loading / waiting / results)
  *   serveKey    `${question.id}:${question_started_at}`, null between questions
  *   settled     the first read of this serve's response has come back
@@ -56,14 +63,24 @@ export default function useRound2Sound({
   hold,
   silent,
 }) {
-  const speaker = useSyncExternalStore(engine.subscribeSpeaker, engine.isSpeaker);
+  const unlocked = useSyncExternalStore(engine.subscribeUnlocked, engine.isUnlocked);
   const channelRef = useRef(null);
+
+  // Load the clips and wait for the page's first gesture.
+  useEffect(() => engine.armUnlock(), []);
+
+  // Read at call time, not closed over: the channel is opened once, and a
+  // command has to be judged against who the hot seat is when it arrives.
+  const canSoundRef = useRef(false);
+  useEffect(() => {
+    canSoundRef.current = isHotSeat && unlocked;
+  }, [isHotSeat, unlocked]);
 
   // The host's soundboard, and the presence that lets it see this screen.
   useEffect(() => {
     const channel = openSoundChannel({
       onCommand: (cmd) => {
-        if (!engine.isSpeaker()) return;
+        if (!canSoundRef.current) return;
         if (cmd?.type === 'play') engine.playExclusive(cmd.id);
         else if (cmd?.type === 'stop') engine.stopAll();
       },
@@ -78,8 +95,8 @@ export default function useRound2Sound({
   }, []);
 
   useEffect(() => {
-    channelRef.current?.track({ speaker });
-  }, [speaker]);
+    channelRef.current?.track({ speaker: isHotSeat, unlocked });
+  }, [isHotSeat, unlocked]);
 
   const cue = revealed
     ? (isCorrect === false ? 'reveal-wrong' : 'reveal-right')
@@ -95,14 +112,14 @@ export default function useRound2Sound({
               ? 'hold'
               : 'question';
 
-  const live = speaker && isHotSeat && boardActive;
+  const live = unlocked && isHotSeat && boardActive;
   const stateRef = useRef(null);
 
   useEffect(() => {
     if (!live) {
-      // Off the board (results, round over, sound muted): whatever the board
-      // had playing goes with it. A device that never had the board — a
-      // speaker that is not the hot seat — has nothing of its own to stop.
+      // Off the board (results, round over): whatever the board had playing
+      // goes with it. A device that never had the board has nothing of its
+      // own to stop.
       if (stateRef.current) {
         engine.stopAll();
         stateRef.current = null;
@@ -113,7 +130,7 @@ export default function useRound2Sound({
     let s = stateRef.current;
 
     // First look at the board. Whatever it is already showing — a refresh
-    // mid-question, sound switched on halfway through — is the baseline, not
+    // mid-question, the page's first click landing halfway through — is the baseline, not
     // an event: replaying a stinger for a moment that already happened is
     // worse than a quiet board. The baseline waits for the response read, so
     // a lock-in that is still loading is not mistaken for a new one.

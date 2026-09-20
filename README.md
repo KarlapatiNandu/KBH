@@ -262,11 +262,14 @@ Supabase Realtime channel (`kbh-sfx`) that needs no table. The sound plays on
 host's machine. The nine clips are in `src/assets/sounds/` (copied, with clean
 names, from `assets and references/sound_effects/`).
 
-- **Enable it on the contestant's screen.** Browsers will not play audio on a
-  page nobody has touched, so the Round 2 screen has an **Enable sound** pill in
-  its header (and on the waiting screen). Click it once per page load — a refresh
-  turns sound off again. Only a screen that has been enabled ever plays, which is
-  also what stops every other participant with the page open from sounding off.
+- **Always on — there is no switch.** Sound plays on the **hot seat
+  contestant's** Round 2 screen; every other participant's screen stays silent,
+  so nobody else in the room sounds off when the host presses a button. The one
+  thing the app cannot get around is the browser's own rule: it will not play
+  audio on a page nobody has touched. Logging in and walking to the round counts
+  as touching it, so normally there is nothing to do. On a screen that was just
+  **refreshed**, the first click, key press or tap anywhere on it unlocks the
+  sound — the Sound Board's status line says when that is still pending.
 - **Automatic cues**, driven by what the board already shows:
 
   | Moment | Sound |
@@ -285,7 +288,8 @@ names, from `assets and references/sound_effects/`).
   (the **KBC intro** has nothing else — no automatic cue), plus **Stop all**. A
   press plays over whatever is running; the show's own cues take over again at
   the next lock-in or serve. The dock's status line says whether a speaker is
-  actually listening, so a muted contestant screen shows up before the show does.
+  actually listening, so a contestant screen still waiting on its first click shows
+  up before the show does.
 
 **Staged option reveal (R18):** run `supabase/migration_v12.sql`, then re-run
 `supabase/rpcs.sql`. Up to the first checkpoint a question goes up with its

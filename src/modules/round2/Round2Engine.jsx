@@ -6,7 +6,6 @@ import Round2Results from './Round2Results';
 import PhoneOverlay from './PhoneOverlay';
 import PrizeLadder from './PrizeLadder';
 import useRound2Sound from './useRound2Sound';
-import { SoundToggle } from '../sound';
 import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './lifelines';
 // The rung a question is played for (R16) — shared with the host's console,
 // so both screens agree on where the run is standing.
@@ -889,7 +888,6 @@ export default function Round2Engine({ participant }) {
           <div className="r2-pulse-dots">
             <span /><span /><span />
           </div>
-          <SoundToggle />
           <button className="btn btn-secondary btn-sm r2-back-btn" onClick={handleBack}>
             ← Back
           </button>
@@ -930,12 +928,9 @@ export default function Round2Engine({ participant }) {
             ← Back
           </button>
           <h2 className="r2-header-title">Round 2 : Hot Seat</h2>
-          <div className="r2-header-right">
-            <SoundToggle />
-            <span className="badge badge--warning" style={{ background: 'var(--warning-amber)', color: 'var(--deep-midnight)' }}>
-              ● LIVE
-            </span>
-          </div>
+          <span className="badge badge--warning" style={{ background: 'var(--warning-amber)', color: 'var(--deep-midnight)' }}>
+            ● LIVE
+          </span>
         </header>
 
         {error && (
@@ -1145,12 +1140,6 @@ function Round2Styles() {
         margin-bottom: var(--space-xl);
         padding-bottom: var(--space-md);
         border-bottom: 1px solid rgba(245,166,35,0.2);
-      }
-
-      .r2-header-right {
-        display: flex;
-        align-items: center;
-        gap: var(--space-sm);
       }
 
       .r2-header-title {

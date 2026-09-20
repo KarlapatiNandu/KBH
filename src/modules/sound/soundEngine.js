@@ -4,10 +4,12 @@ import { SOUNDS, SOUND_BY_ID } from './sounds';
  * R17 — the audio engine. A module singleton over one preloaded
  * HTMLAudioElement per clip.
  *
- * A device only ever plays once it has been made a *speaker* — see
- * `enableSpeaker`. That is a click, which is what the browser's autoplay
- * rules want anyway, and it is what stops every participant with the Round 2
- * page open from sounding off when the host presses a button.
+ * There is no "enable sound" step. Browsers still refuse to play audio on a
+ * page nobody has touched, so `armUnlock` waits (invisibly) for the first
+ * click, key press or tap anywhere on the page and unlocks every clip then.
+ * The login that leads to the Round 2 screen is already such a click, and in
+ * that case the unlock happens the moment the screen mounts. Who is allowed to
+ * make noise is not decided here — see useRound2Sound.
  *
  * HTMLAudioElement rather than WebAudio: the beds are 14–18 s MP3s, and the
  * small encoder-padding gap when one loops is inaudible under a suspense pad.
@@ -22,7 +24,12 @@ const fades = new Map(); // id -> interval id of a fade-out in flight
 // Clips a hold froze mid-play, to be picked up again by `resumeAll`.
 const paused = new Set();
 
-let speaker = false;
+// Has the page had the user gesture the browser wants before it will play?
+let unlocked = typeof navigator !== 'undefined' && !!navigator.userActivation?.hasBeenActive;
+let armed = false;
+// The unlock pass runs once per page: a second one would "unlock" a clip a
+// hold has paused mid-play, and reset its position.
+let elementsUnlocked = false;
 const listeners = new Set();
 
 function notify() {
@@ -56,24 +63,59 @@ function halt(a) {
   a.volume = 1;
 }
 
-// ─── Speaker state ──────────────────────────────────────────
+// ─── Unlock state ───────────────────────────────────────────
 
-export function isSpeaker() {
-  return speaker;
+export function isUnlocked() {
+  return unlocked;
 }
 
 // For useSyncExternalStore.
-export function subscribeSpeaker(fn) {
+export function subscribeUnlocked(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
+const GESTURES = ['pointerdown', 'keydown', 'touchstart'];
+
 /**
- * Make this device the one the room hears. Must run inside a click: playing
- * and immediately pausing every element there is what lets Safari (which
- * unlocks per element) and Chrome play them later without a gesture.
+ * Get the clips ready and unlock them at the first opportunity. Loads every
+ * clip now, so the first cue does not wait on a download, then unlocks on the
+ * spot if the page has already had a gesture, or on the first one it gets.
+ * Returns a disposer. Safe to call from several places; only the first arms.
  */
-export function enableSpeaker() {
+export function armUnlock() {
+  SOUNDS.forEach(({ id }) => element(id));
+
+  if (armed) return () => {};
+  armed = true;
+
+  if (unlocked) {
+    unlockElements();
+    return () => {};
+  }
+
+  const onGesture = () => {
+    dispose();
+    unlockElements();
+    unlocked = true;
+    notify();
+  };
+  const dispose = () => {
+    GESTURES.forEach((type) => document.removeEventListener(type, onGesture, true));
+    armed = false;
+  };
+  GESTURES.forEach((type) => document.addEventListener(type, onGesture, true));
+  return dispose;
+}
+
+/**
+ * Playing and immediately pausing every element inside a gesture is what
+ * lets Safari (which unlocks per element) and Chrome play them later without
+ * one.
+ */
+function unlockElements() {
+  if (elementsUnlocked) return;
+  elementsUnlocked = true;
   SOUNDS.forEach(({ id }) => {
     const a = element(id);
     if (!a || !a.paused) return;
@@ -90,14 +132,6 @@ export function enableSpeaker() {
         a.muted = false;
       });
   });
-  speaker = true;
-  notify();
-}
-
-export function disableSpeaker() {
-  stopAll({ fade: false });
-  speaker = false;
-  notify();
 }
 
 // ─── Playback ───────────────────────────────────────────────

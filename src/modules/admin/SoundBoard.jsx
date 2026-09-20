@@ -6,14 +6,16 @@ import { SOUNDS, SOUND_GROUPS, openSoundChannel } from '../sound';
  *
  * A dock down the right of the admin panel, so it stays under the host's hand
  * on Round Control instead of being one more tab to leave the show for. Every
- * press is broadcast on the `kbh-sfx` channel and played by whichever Round 2
- * screen has been made a speaker (SoundToggle) — nothing plays on this
- * machine. Every clip is here, KBC intro included; that one has no automatic
- * cue and is only ever played from this dock.
+ * press is broadcast on the `kbh-sfx` channel and played by the hot seat's
+ * Round 2 screen — nothing plays on this machine. Every clip is here, KBC
+ * intro included; that one has no automatic cue and is only ever played from
+ * this dock.
  *
- * The status line is Presence: it says whether a speaker is actually
- * listening, which is the thing that goes wrong on the day (a refreshed
- * contestant screen is silent until someone clicks Enable sound on it).
+ * The status line is Presence: it says whether that screen is actually
+ * listening, which is the thing that goes wrong on the day. Sound needs no
+ * switch, but a browser will not play on a page nobody has touched, so a
+ * contestant screen that was just refreshed is silent until the first click
+ * anywhere on it.
  */
 
 const FLASH_MS = 700;
@@ -46,17 +48,20 @@ export default function SoundBoard({ onClose }) {
     flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
   }, []);
 
-  const speakers = screens.filter((s) => s.speaker).length;
+  // `speaker` is the hot seat's screen; `unlocked` is whether the browser has
+  // let it play yet.
+  const speakers = screens.filter((s) => s.speaker);
+  const ready = speakers.filter((s) => s.unlocked).length;
 
   let status;
   if (!connected) {
     status = { tone: 'off', text: 'Connecting…' };
-  } else if (speakers > 0) {
-    status = { tone: 'ok', text: speakers === 1 ? 'Speaker ready' : `${speakers} speakers ready` };
-  } else if (screens.length > 0) {
-    status = { tone: 'warn', text: 'Round 2 screen is muted — click Enable sound on it' };
+  } else if (ready > 0) {
+    status = { tone: 'ok', text: 'Contestant screen ready' };
+  } else if (speakers.length > 0) {
+    status = { tone: 'warn', text: 'Click anywhere on the contestant’s screen once — the browser blocks sound until then' };
   } else {
-    status = { tone: 'off', text: 'No Round 2 screen connected' };
+    status = { tone: 'off', text: 'No hot seat screen connected — nominate the contestant' };
   }
 
   return (
@@ -99,8 +104,9 @@ export default function SoundBoard({ onClose }) {
       ))}
 
       <p className="sb-note">
-        Plays on the contestant&rsquo;s screen, over whatever is running. The
-        show&rsquo;s own cues take over again at the next lock-in or serve.
+        Plays on the hot seat contestant&rsquo;s screen, over whatever is
+        running. The show&rsquo;s own cues take over again at the next lock-in
+        or serve.
       </p>
 
       <style>{`
