@@ -358,28 +358,7 @@ export default function QuestionCard({
           room votes; the chart replaces it once the host ends the poll (R11).
           The phone lifelines put PhoneOverlay up over the whole board and
           this line sits underneath it. */}
-        {bannerKey && (
-          <div className={`r2-ll-banner ${bannerLive && lifelineHolding ? '' : 'r2-ll-banner--picked'}`}>
-            <span className="r2-ll-banner-badge">
-              <LifelineIcon lifelineKey={bannerKey} />
-            </span>
-            <span className="r2-ll-banner-text">
-              <strong>{lifelineLabel(bannerKey)}</strong>
-              <span>
-                {!bannerLive
-                  ? 'Your clock is paused — the host is setting it up.'
-                  : !lifelineHolding
-                    ? 'Time is up on this — your clock is running again.'
-                    : bannerKey === 'audience_poll'
-                      ? 'The audience is voting — your clock is paused.'
-                      : 'The question clock is paused while this runs.'}
-              </span>
-            </span>
-            <span className="r2-ll-banner-live">
-              {!bannerLive ? '● PICKED' : lifelineHolding ? '● LIVE' : '● TIME UP'}
-            </span>
-          </div>
-        )}
+
 
         {/* Host-controlled: what the contestant should do now. Once the clock
           has run out there is nothing to say here, so the hint drops away
