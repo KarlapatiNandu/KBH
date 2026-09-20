@@ -3,6 +3,7 @@ import QuestionManager from './QuestionManager';
 import ParticipantImport from './ParticipantImport';
 import RoundControl from './RoundControl';
 import LiveDashboard from './LiveDashboard';
+import SoundBoard from './SoundBoard';
 import logo from '../../assets/logo.png';
 
 const NAV_ITEMS = [
@@ -12,8 +13,30 @@ const NAV_ITEMS = [
   { key: 'rounds', label: 'Round Control', icon: '🎮' },
 ];
 
+// Remembered per browser, so the dock is where the host left it after a refresh.
+const SOUND_DOCK_KEY = 'kbh-sound-dock-open';
+
+function readDockOpen() {
+  try {
+    return localStorage.getItem(SOUND_DOCK_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export default function AdminLayout({ admin, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [soundOpen, setSoundOpen] = useState(readDockOpen);
+
+  const toggleSound = () => {
+    const next = !soundOpen;
+    setSoundOpen(next);
+    try {
+      localStorage.setItem(SOUND_DOCK_KEY, next ? '1' : '0');
+    } catch {
+      // Private mode / storage off: the dock still works, it just forgets.
+    }
+  };
 
   const handleLogout = () => {
     onLogout();
@@ -71,11 +94,28 @@ export default function AdminLayout({ admin, onLogout }) {
             {NAV_ITEMS.find((i) => i.key === activeTab)?.icon}{' '}
             {NAV_ITEMS.find((i) => i.key === activeTab)?.label}
           </h1>
+          <button
+            type="button"
+            className={`btn btn-sm ${soundOpen ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={toggleSound}
+            aria-pressed={soundOpen}
+          >
+            🔊 Sounds
+          </button>
         </header>
         <div className="admin-content">
           {renderContent()}
         </div>
       </main>
+
+      {/* R17 — the soundboard dock. Sits beside the content on wide screens
+          and over it on narrow ones, so Round Control never loses width it
+          needs. */}
+      {soundOpen && (
+        <aside className="admin-sounds" aria-label="Sound board">
+          <SoundBoard onClose={toggleSound} />
+        </aside>
+      )}
 
       <style>{`
         .admin-layout {
@@ -197,6 +237,10 @@ export default function AdminLayout({ admin, onLogout }) {
         .admin-topbar {
           padding: var(--space-lg) var(--space-xl);
           border-bottom: 1px solid rgba(242,183,5,0.08);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: var(--space-md);
         }
 
         .admin-page-title {
@@ -208,6 +252,27 @@ export default function AdminLayout({ admin, onLogout }) {
           flex: 1;
           padding: var(--space-xl);
           overflow-y: auto;
+        }
+
+        /* ── Sound board dock (R17) ── */
+        .admin-sounds {
+          width: 280px;
+          flex-shrink: 0;
+          background: rgba(11,20,64, 0.95);
+          border-left: 1px solid rgba(242,183,5,0.1);
+          overflow-y: auto;
+        }
+
+        @media (max-width: 1100px) {
+          .admin-sounds {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 50;
+            max-width: 90vw;
+            box-shadow: -12px 0 32px rgba(0,0,0,0.45);
+          }
         }
 
         @media (max-width: 768px) {

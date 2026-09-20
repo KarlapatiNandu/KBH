@@ -256,6 +256,37 @@ contestant. What they take home is unchanged in spirit — the last guaranteed
 rung they passed — but a rung is cleared by *any* question played for it being
 answered correctly (`round2/checkpoints.js`).
 
+**Sound effects (R17):** no migration — this is front-end only, over a
+Supabase Realtime channel (`kbh-sfx`) that needs no table. The sound plays on
+**the contestant's Round 2 screen**, the one the room can see, not on the
+host's machine. The nine clips are in `src/assets/sounds/` (copied, with clean
+names, from `assets and references/sound_effects/`).
+
+- **Enable it on the contestant's screen.** Browsers will not play audio on a
+  page nobody has touched, so the Round 2 screen has an **Enable sound** pill in
+  its header (and on the waiting screen). Click it once per page load — a refresh
+  turns sound off again. Only a screen that has been enabled ever plays, which is
+  also what stops every other participant with the page open from sounding off.
+- **Automatic cues**, driven by what the board already shows:
+
+  | Moment | Sound |
+  |---|---|
+  | Question goes live | question sting, then a suspense bed (2 or 3, picked at random, never the same twice running) looping under the clock |
+  | Lifeline picked / Audience Poll chart up | the bed pauses with the clock and resumes with it |
+  | Audience Poll live | poll suspense (suspense 1) |
+  | Host locks the answer | lock sting, then the after-lock suspense until the reveal |
+  | Host reveals | right-answer or wrong-answer |
+  | Timer runs out, nothing locked | the bed stops; no buzzer |
+
+  A refresh mid-question does not replay the moment it missed: the board
+  starts quiet and the next cue plays normally.
+- **Sound Board** — the **🔊 Sounds** button in the admin top bar opens a dock
+  down the right side that stays put on any tab. Every clip has a button there
+  (the **KBC intro** has nothing else — no automatic cue), plus **Stop all**. A
+  press plays over whatever is running; the show's own cues take over again at
+  the next lock-in or serve. The dock's status line says whether a speaker is
+  actually listening, so a muted contestant screen shows up before the show does.
+
 ### 3. Admin account
 
 The admin is a single Supabase Auth user. Create it once in the dashboard —

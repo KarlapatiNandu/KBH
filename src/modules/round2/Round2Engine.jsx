@@ -5,6 +5,8 @@ import QuestionCard from './QuestionCard';
 import Round2Results from './Round2Results';
 import PhoneOverlay from './PhoneOverlay';
 import PrizeLadder from './PrizeLadder';
+import useRound2Sound from './useRound2Sound';
+import { SoundToggle } from '../sound';
 import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './lifelines';
 // The rung a question is played for (R16) — shared with the host's console,
 // so both screens agree on where the run is standing.
@@ -132,6 +134,14 @@ export default function Round2Engine({ participant }) {
   const responseSigRef = useRef(undefined);
 
   const answeredQuestionsRef = useRef(new Set());
+
+  // R17 — the sound hook's view of "which question is live". State rather
+  // than a value derived from roundState in render: it flips in the same
+  // batch that clears the previous question's answer and reveal, so the hook
+  // never sees a new serve wearing the last question's verdict. `settledKey`
+  // is the serve whose first response read has come back.
+  const [servedKey, setServedKey] = useState(null);
+  const [settledKey, setSettledKey] = useState(null);
 
   // Latest round state / questions for callbacks that must not re-subscribe
   // on every realtime tick.
@@ -465,6 +475,7 @@ export default function Round2Engine({ participant }) {
     const anchorKey = `${currentQ.id}:${roundState.question_started_at}`;
     if (anchorKeyRef.current === anchorKey) return;
     anchorKeyRef.current = anchorKey;
+    setServedKey(anchorKey);
 
     // R6 - anchor the countdown on the local clock, now, so a slow realtime
     // push does not eat into this participant's answer window.
@@ -487,6 +498,7 @@ export default function Round2Engine({ participant }) {
     // A response may already exist - page reload, or a re-serve that did not
     // clear responses. Reflect it so the verdict survives a refresh.
     checkExistingResponse(currentQ.id).then((existing) => {
+      setSettledKey(anchorKey);
       if (!existing || existing === READ_FAILED) return;
       answeredQuestionsRef.current.add(currentQ.id);
       responseSigRef.current = `${existing.selected_option}:${existing.is_correct}:${existing.points_awarded}:${existing.response_time_ms}:${existing.revealed_at}`;
@@ -750,6 +762,32 @@ export default function Round2Engine({ participant }) {
     return () => clearInterval(id);
   }, [phoneAnchorKey, syncContacts]);
 
+  // R17 — the sound cues. Called here, above every early return below, so the
+  // hook order never changes with the screen.
+  useRound2Sound({
+    isHotSeat: !!roundState && roundState.active_participant_id === participant.participant_id,
+    boardActive:
+      !eliminated &&
+      (gamePhase === 'active' ||
+        gamePhase === 'transition' ||
+        gamePhase === 'held' ||
+        gamePhase === 'eliminated'),
+    serveKey: servedKey,
+    settled: settledKey === servedKey,
+    pollLive: activeLifeline?.key === 'audience_poll',
+    answerLocked,
+    revealed,
+    isCorrect: lastResult?.is_correct,
+    hold: pickHolding || pollHolding,
+    // Past the point of a live question: the timer ran out with nothing
+    // locked, or the board is between questions / waiting on the host.
+    silent:
+      gamePhase === 'transition' ||
+      gamePhase === 'held' ||
+      gamePhase === 'eliminated' ||
+      (hasAnswered && selectedOption === null),
+  });
+
   // Render logic
 
   // If we are not the active participant and the round is active/completed, we shouldn't really be here,
@@ -823,6 +861,7 @@ export default function Round2Engine({ participant }) {
           <div className="r2-pulse-dots">
             <span /><span /><span />
           </div>
+          <SoundToggle />
           <button className="btn btn-secondary btn-sm r2-back-btn" onClick={handleBack}>
             ← Back
           </button>
@@ -863,9 +902,12 @@ export default function Round2Engine({ participant }) {
             ← Back
           </button>
           <h2 className="r2-header-title">Round 2 : Hot Seat</h2>
-          <span className="badge badge--warning" style={{ background: 'var(--warning-amber)', color: 'var(--deep-midnight)' }}>
-            ● LIVE
-          </span>
+          <div className="r2-header-right">
+            <SoundToggle />
+            <span className="badge badge--warning" style={{ background: 'var(--warning-amber)', color: 'var(--deep-midnight)' }}>
+              ● LIVE
+            </span>
+          </div>
         </header>
 
         {error && (
@@ -1072,6 +1114,12 @@ function Round2Styles() {
         margin-bottom: var(--space-xl);
         padding-bottom: var(--space-md);
         border-bottom: 1px solid rgba(245,166,35,0.2);
+      }
+
+      .r2-header-right {
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
       }
 
       .r2-header-title {
