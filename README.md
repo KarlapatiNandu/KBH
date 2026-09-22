@@ -274,15 +274,43 @@ names, from `assets and references/sound_effects/`).
 
   | Moment | Sound |
   |---|---|
-  | Question goes live | question sting, then a suspense bed (2 or 3, picked at random, never the same twice running) looping under the clock. A staged question (R18) gets the sting alone; the bed starts when the host reveals the options |
-  | Lifeline picked / Audience Poll chart up | the bed pauses with the clock and resumes with it |
+  | Question goes live | question sting, then a suspense bed (2 or 3) looping under the clock. A staged question (R18) gets the sting alone; the bed starts when the host reveals the options |
+  | Contestant enters Round 2 on a question already up | the same: sting, then the bed (R19) — the first question of the night is reached on this screen rather than served to it |
+  | Lifeline picked / Audience Poll chart up | the bed goes out with the clock |
   | Audience Poll live | poll suspense (suspense 1) |
-  | Host locks the answer | lock sting, then the after-lock suspense until the reveal |
+  | Lifeline finished / chart hidden — the clock is back | a suspense bed again, from the top (R19), and always the other of the two, so the room hears the question come back |
+  | Host locks the answer | lock sting, then a suspense bed until the reveal (R19) |
   | Host reveals | right-answer or wrong-answer |
   | Timer runs out, nothing locked | the bed stops; no buzzer |
 
-  A refresh mid-question does not replay the moment it missed: the board
-  starts quiet and the next cue plays normally.
+  The bed alternates: each one it starts is the other of the two, so no
+  restart is ever the same pad twice running.
+
+  **Nothing plays a whole file (R19).** The clips were cut with up to a
+  second of digital silence on the front and the back — suspense A makes no
+  sound for its first 0.85 s — so every clip declares the window its music
+  actually occupies (`music` in `sound/sounds.js`, measured at −50 dB). A clip
+  starts at its music, a looping bed goes back to that point the moment it
+  reaches the end of its music rather than at the end of the file, and the
+  sting hands the bed over at its last note instead of waiting out its silent
+  tail. Left to the browser's own `loop`, the bed dropped the room into about
+  a second of nothing every time round. The question sting's own lead-in is
+  the one thing left alone — the pause before it lands is the sting.
+
+  A board that comes up mid-question opens on the sting, but does not replay
+  a moment that has already passed: one that comes up on an answer already
+  locked, or a verdict, or a live poll, stays quiet until the next cue. The
+  after-lock suspense clip is no longer cued by itself — it is on the Sound
+  Board for the host to fire by hand.
+- **The KBC intro ends the run (R20).** The intro is still the one clip with
+  no automatic cue — the host plays it from the Sound Board over a win. On the
+  **top rung of the ladder, answered right**, that press is also the end of
+  Round 2: the board holds the final question for as long as the music runs,
+  and the moment the music ends the contestant goes to **Round 2 Results**
+  (as a completed run, not a knock-out). Nothing loops it, and nothing picks
+  up after it — at a checkpoint the room is left in silence until the next
+  serve. A run whose intro is never played holds on the board as before, until
+  the host ends the round.
 - **Sound Board** — the **🔊 Sounds** button in the admin top bar opens a dock
   down the right side that stays put on any tab. Every clip has a button there
   (the **KBC intro** has nothing else — no automatic cue), plus **Stop all**. A
@@ -385,7 +413,9 @@ Sign in at `/` on the **Admin** tab (or `/admin/login`).
 - **Round Control** — start / end / reset each round, pick the hot seat, and the
   **Question Console**. While Round 2 is live, a **Lock in answer** panel shows
   the current question with A–D buttons — click one, then click it again to
-  confirm; the contestant's screen turns green/red instantly. Re-serve with
+  confirm; the contestant's screen turns green/red instantly. The **correct
+  option** is noted under the question from the moment it is served (R20), so
+  the host is not reading the answer off a printout. Re-serve with
   *Clear answers on serve* to replay a question.
   - **Serve** any question at any time, in any order.
   - **Manual mode** (turned on automatically the first time you serve) stops

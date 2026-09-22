@@ -6,6 +6,8 @@ import Round2Results from './Round2Results';
 import PhoneOverlay from './PhoneOverlay';
 import PrizeLadder from './PrizeLadder';
 import useRound2Sound from './useRound2Sound';
+// R20 — the end of a clip is a beat the run waits on; see `finished` below.
+import { engine } from '../sound';
 import { CONTACT_KIND, DEFAULT_LIFELINE_DURATION_MS, isPhoneLifeline } from './lifelines';
 // The rung a question is played for (R16) — shared with the host's console,
 // so both screens agree on where the run is standing.
@@ -91,6 +93,12 @@ export default function Round2Engine({ participant }) {
   // flips, the board is still showing the black question and the red tag.
   const [eliminated, setEliminated] = useState(false);
   const eliminationTimeoutRef = useRef(null);
+
+  // R20 — the other way a run ends: the top of the ladder, answered right.
+  // Nothing is served above that rung, so the board holds the win while the
+  // show's music plays and this flips when the music ends, taking the
+  // contestant to their results (see the effect further down).
+  const [finished, setFinished] = useState(false);
 
   // R10 — the four lifeline rows, and the phone book the two call lifelines
   // dial from. `lifelinesLoaded` stays false on a database that has not run
@@ -426,9 +434,10 @@ export default function Round2Engine({ participant }) {
 
   // ─── Derive game phase from round_state ──────────────────────
   useEffect(() => {
-    // R15 — their run is over; a fresh serve is for whoever is in the hot
-    // seat now, and must not pull this contestant off their results.
-    if (eliminated) return;
+    // R15/R20 — their run is over, won or lost; a fresh serve is for whoever
+    // is in the hot seat now, and must not pull this contestant off their
+    // results.
+    if (eliminated || finished) return;
 
     if (!questionsLoaded || !roundState) {
       setGamePhase('loading');
@@ -512,7 +521,7 @@ export default function Round2Engine({ participant }) {
       // A reload mid-reveal must come back revealed, not replay the hold. (R9)
       setRevealed(!!existing.revealed_at);
     });
-  }, [roundState, questionsLoaded, questions, checkExistingResponse, eliminated]);
+  }, [roundState, questionsLoaded, questions, checkExistingResponse, eliminated, finished]);
 
   // Once the question is settled — the timer ran out on an unanswered
   // question, or the host revealed the verdict — hand the round on: hold for
@@ -582,6 +591,7 @@ export default function Round2Engine({ participant }) {
       // only way this fires is the host clearing the answer on the question
       // that is still live — which is them saying it was locked in wrong.
       setEliminated(false);
+      setFinished(false);
       return;
     }
     settleQuestion();
@@ -610,6 +620,34 @@ export default function Round2Engine({ participant }) {
   const currentLevel = rungForQuestion(currentQuestion, questions);
   const currentRung = ladder.find((r) => r.level === currentLevel) || null;
   const currentPrizeLabel = currentQuestion?.prize || currentRung?.label || null;
+
+  // R20 — the top of the ladder: the rung a run finishes on. A correct answer
+  // there does not open the next rung, because there is no next rung. Without
+  // a ladder (a database without migration_v10) the queue is the run, and its
+  // last question is the top of it.
+  const topLevel = ladder.length ? Math.max(...ladder.map((r) => r.level)) : null;
+  const onTopRung =
+    topLevel != null
+      ? currentLevel != null && currentLevel >= topLevel
+      : questions.length > 0 && currentQuestion?.id === questions[questions.length - 1].id;
+
+  // The last rung, answered right, and the verdict is up: the run is over bar
+  // the music.
+  const runComplete = onTopRung && revealed && lastResult?.is_correct === true;
+
+  // R20 — and the music is what ends it. The host plays the KBC intro over
+  // the win from the soundboard (it is the one clip with no automatic cue),
+  // the board holds the final question under it for as long as it runs, and
+  // the moment it finishes the contestant goes to their results rather than
+  // sitting on a dead board. Nothing is advanced on the way out — there is
+  // no rung above this one to serve, so a pending auto-advance is cleared.
+  // If the intro is never played the board simply holds, exactly as it did
+  // before, until the host ends the round.
+  useEffect(() => {
+    if (!runComplete) return;
+    clearTimeout(advanceTimeoutRef.current);
+    return engine.onEnded('kbc-intro', () => setFinished(true));
+  }, [runComplete]);
 
   // R16 — what the board counts. "Question 3 of 5" was the queue's length
   // back when the queue was the run; with a pool per rung the bank may hold
@@ -794,6 +832,7 @@ export default function Round2Engine({ participant }) {
     isHotSeat: !!roundState && roundState.active_participant_id === participant.participant_id,
     boardActive:
       !eliminated &&
+      !finished &&
       (gamePhase === 'active' ||
         gamePhase === 'transition' ||
         gamePhase === 'held' ||
@@ -845,14 +884,18 @@ export default function Round2Engine({ participant }) {
   // R15 — knocked out. The reveal has had its beat on the board and this
   // contestant's run is over: the results screen leads with the checkpoint
   // they take home, not with the question that ended it.
-  if (eliminated) {
+  //
+  // R20 — or they went all the way: the top rung answered right, and the
+  // show's music has played out over it. Same screen, and it reads as the
+  // run being completed rather than ended.
+  if (eliminated || finished) {
     return (
       <div className="r2-screen">
         <Round2Results
           participant={participant}
           questions={questions}
           ladder={ladder}
-          eliminated
+          eliminated={eliminated}
           onBack={handleBack}
         />
         <Round2Styles />

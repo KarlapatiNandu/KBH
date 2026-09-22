@@ -21,12 +21,18 @@ import { engine, openSoundChannel, QUESTION_SUSPENSE } from '../sound';
  *   hold                         a lifeline has the question clock stopped
  *   question                     the question is live and the clock is running
  *
- * `hold` pauses the bed and `question` picks it up where it stopped, so the
- * sound freezes and resumes exactly with the countdown.
+ * `hold` takes the bed out with the clock, and `question` brings a bed back
+ * with it — the other of the two, from the top (R19). Every return of the
+ * clock is one the room should hear: the poll's chart coming off the board,
+ * a 50:50 landing, a call ending.
  *
  * A staged question (R18) gets its sting when it goes up and then nothing:
  * the bed belongs to the clock, so it starts when the host releases the
  * options, and the sting is left to finish rather than being cut.
+ *
+ * The board coming up on a question already in play gets the sting too
+ * (R19) — the contestant enters Round 2 after the host has served, so the
+ * first question is reached, not served, on this screen.
  *
  * The host's soundboard (SoundBoard.jsx) reaches this same device over the
  * `kbh-sfx` channel: a press plays that clip on its own, over anything else.
@@ -129,19 +135,24 @@ export default function useRound2Sound({
 
     let s = stateRef.current;
 
-    // First look at the board. Whatever it is already showing — a refresh
-    // mid-question, the page's first click landing halfway through — is the baseline, not
-    // an event: replaying a stinger for a moment that already happened is
-    // worse than a quiet board. The baseline waits for the response read, so
-    // a lock-in that is still loading is not mistaken for a new one.
+    // First look at the board — the contestant entering Round 2, a refresh
+    // mid-question, the page's first click landing halfway through. What is
+    // on screen is the baseline rather than a run of events, and only one
+    // thing is played over it: a question still being answered opens with its
+    // sting (see openBoard). Anything further along — an answer in, a verdict
+    // up — keeps the baseline's silence. The baseline waits for the response
+    // read, so a lock-in that is still loading is not mistaken for a new one,
+    // and the opening cue is decided on what that read comes back with.
     if (!s) {
       s = stateRef.current = {
         serveKey,
         cue,
         hydrating: serveKey != null && !settled,
+        opening: true,
         track: null,
         lastTrack: null,
       };
+      if (!s.hydrating) openBoard(s, serveKey, cue, optionsHidden);
       return;
     }
 
@@ -152,15 +163,14 @@ export default function useRound2Sound({
       engine.stopAll();
       if (serveKey == null) return;
 
-      s.track = pickSuspense(s.lastTrack);
-      s.lastTrack = s.track;
+      s.opening = false;
       if (optionsHidden) {
         // Staged: the sting for the question going up, and the bed waits for
         // the clock.
         engine.play('question-sting');
         s.cue = 'staged';
       } else {
-        engine.playThen('question-sting', s.track, { loopNext: true });
+        engine.playThen('question-sting', nextBed(s), { loopNext: true });
         s.cue = 'question';
       }
     }
@@ -169,6 +179,7 @@ export default function useRound2Sound({
       if (settled) {
         s.hydrating = false;
         s.cue = cue;
+        openBoard(s, serveKey, cue, optionsHidden);
       }
       return;
     }
@@ -180,39 +191,77 @@ export default function useRound2Sound({
   }, [live, serveKey, optionsHidden, settled, cue]);
 }
 
-// Random, but never the bed the previous question had.
+// Random, but never the bed that was on last.
 function pickSuspense(last) {
   const options = QUESTION_SUSPENSE.filter((id) => id !== last);
   return options[Math.floor(Math.random() * options.length)];
 }
 
-function transition(from, to, s) {
-  if (from === 'poll') engine.stop('suspense-poll');
+/**
+ * R19 — the next suspense bed, and the only place one is chosen. Always the
+ * other of the two, so a bed that starts again after a lifeline, a lock-in or
+ * a new serve is audibly a new one rather than the same pad picking back up.
+ * Remembered on the state, so it carries across questions.
+ */
+function nextBed(s) {
+  s.track = pickSuspense(s.track ?? s.lastTrack);
+  s.lastTrack = s.track;
+  return s.track;
+}
 
+/**
+ * R19 — the board coming up on a question that is already live: the sting,
+ * then the bed, exactly as if the serve had happened here. The contestant
+ * reaches this screen by entering Round 2 *after* the host has served, so
+ * without this the first question of the night is played out in silence.
+ *
+ * Only for a question still being answered. A board that comes up on an
+ * answer already locked, a verdict, or a poll keeps its silence: replaying a
+ * stinger for a moment that has already passed is worse than a quiet board.
+ */
+function openBoard(s, serveKey, cue, optionsHidden) {
+  if (!s.opening) return;
+  s.opening = false;
+  if (serveKey == null) return;
+  if (cue !== 'question' && cue !== 'staged') return;
+
+  if (optionsHidden) {
+    // Staged: the sting alone, and the bed waits for the clock. (R18)
+    engine.play('question-sting');
+    return;
+  }
+  engine.playThen('question-sting', nextBed(s), { loopNext: true });
+}
+
+// Every branch below that leaves the poll behind stops everything, the
+// poll's own bed with it, so there is nothing to unwind from `from` first.
+function transition(from, to, s) {
   switch (to) {
     case 'question':
       // Options just released on a staged question: the bed starts under the
       // clock, and the sting from the question going up is not cut for it.
       if (from === 'staged') {
-        s.track ??= pickSuspense(s.lastTrack);
-        engine.play(s.track, { loop: true });
+        engine.play(nextBed(s), { loop: true });
         break;
       }
-      // Out of a hold or the poll: the bed the clock froze under picks up
-      // where it stopped. Out of anything else (a cleared answer) it starts
-      // again — there is no sting to replay, the question is not new.
-      if ((from === 'hold' || from === 'poll') && engine.resumeAll()) break;
+      // R19 — the clock is the contestant's again: the poll's chart is off
+      // the board, or a lifeline has finished, or the host cleared an answer.
+      // The bed starts from the top, and it is the other one of the two — a
+      // pad resuming mid-phrase is not something the room hears as the
+      // question coming back, and this moment is the one that has to land.
       engine.stopAll();
-      s.track ??= pickSuspense(s.lastTrack);
-      engine.play(s.track, { loop: true });
+      engine.play(nextBed(s), { loop: true });
       break;
 
     case 'hold':
-      engine.pauseAll();
+      // R19 — the bed goes out with the clock. It is stopped rather than
+      // frozen: what comes back when the lifeline closes is a new bed from
+      // the top, so there is nothing left here to pick up.
+      engine.stopAll();
       break;
 
     case 'poll':
-      engine.pauseAll();
+      engine.stopAll();
       engine.play('suspense-poll', { loop: true });
       break;
 
@@ -227,8 +276,13 @@ function transition(from, to, s) {
       break;
 
     case 'locked':
+      // R19 — the lock sting, then a question bed rather than the
+      // after-lock clip, so the wait for the verdict is the same music the
+      // question was played over. The other of the two, for the change of
+      // colour the lock-in deserves. (`suspense-locked` is still on the
+      // soundboard for the host to fire by hand.)
       engine.stopAll();
-      engine.playThen('lock-answer', 'suspense-locked', { loopNext: true });
+      engine.playThen('lock-answer', nextBed(s), { loopNext: true });
       break;
 
     case 'reveal-right':
