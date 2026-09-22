@@ -1,4 +1,5 @@
 import { parseCsv, mapHeader } from './csv';
+import { isAnswerComplete, normalizeAnswer } from '../round1/answers';
 
 /**
  * CSV → question rows, with every complaint the host needs to hear before
@@ -8,6 +9,8 @@ import { parseCsv, mapHeader } from './csv';
 
 const HEADER_ALIASES = {
   round:       ['round', 'round_no', 'round_number'],
+  // R19 — Round 1's question type. Blank is single-correct.
+  type:        ['type', 'question_type', 'kind'],
   text:        ['text', 'question', 'question_text'],
   option_a:    ['option_a', 'optiona', 'option_1', 'option1', 'a'],
   option_b:    ['option_b', 'optionb', 'option_2', 'option2', 'b'],
@@ -25,13 +28,48 @@ const HEADER_ALIASES = {
 const REQUIRED = ['round', 'text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct'];
 
 export const TEMPLATE_ROWS = [
-  ['round', 'text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct', 'base_points', 'duration_s', 'prize', 'ladder_level'],
-  ['1', 'Which planet is closest to the Sun?', 'Mercury', 'Venus', 'Earth', 'Mars', 'A', '100', '30', '', ''],
+  ['round', 'type', 'text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct', 'base_points', 'duration_s', 'prize', 'ladder_level'],
+  // One round 1 row of each type (R19), since `correct` reads differently
+  // for each: one letter, every correct letter, or the letters in order.
+  ['1', 'single', 'Which planet is closest to the Sun?', 'Mercury', 'Venus', 'Earth', 'Mars', 'A', '100', '30', '', ''],
+  ['1', 'multiple', 'Which of these are prime numbers?', '2', '9', '13', '21', 'A,C', '100', '30', '', ''],
+  ['1', 'order', 'Arrange from closest to farthest from the Sun.', 'Earth', 'Mercury', 'Mars', 'Venus', 'B>D>A>C', '100', '30', '', ''],
   // Two round 2 rows on the same rung, because that is the thing about the
   // column a host cannot guess from its name: a rung is a pool to pick from.
-  ['2', 'In 1969, who first set foot on the Moon?', 'Buzz Aldrin', 'Neil Armstrong', 'Yuri Gagarin', 'Michael Collins', 'B', '200', '', '10,000', '3'],
-  ['2', 'Which ocean is the deepest?', 'Atlantic', 'Indian', 'Pacific', 'Arctic', 'C', '200', '', '10,000', '3'],
+  ['2', '', 'In 1969, who first set foot on the Moon?', 'Buzz Aldrin', 'Neil Armstrong', 'Yuri Gagarin', 'Michael Collins', 'B', '200', '', '10,000', '3'],
+  ['2', '', 'Which ocean is the deepest?', 'Atlantic', 'Indian', 'Pacific', 'Arctic', 'C', '200', '', '10,000', '3'],
 ];
+
+// R19 — what a host might type in the `type` column, spaces and dashes
+// already turned into underscores.
+const TYPE_ALIASES = {
+  single:   ['', 'single', 'single_correct', 'scq', 'one'],
+  multiple: ['multiple', 'multi', 'multiple_correct', 'mcq', 'many'],
+  order:    ['order', 'ordering', 'sequence', 'sort', 'choose_the_right_order', 'right_order'],
+};
+
+export function parseType(raw) {
+  const v = String(raw ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return Object.keys(TYPE_ALIASES).find((t) => TYPE_ALIASES[t].includes(v)) || null;
+}
+
+/**
+ * R19 — a Round 1 answer key: "A,C", "A C", "AC", "B>D>A>C", "2,4,1,3"…
+ * Letters or 1-based numbers, separated by anything that is not one.
+ * Returns option indices in the order written, or null if a piece is not an
+ * option.
+ */
+export function parseAnswerKey(raw) {
+  const v = String(raw ?? '').trim().toUpperCase();
+  if (!v) return null;
+  // Anything that is not a letter or digit separates; a piece that is not an
+  // option ("E", "X") fails the whole key rather than being dropped.
+  let tokens = v.split(/[^A-Z0-9]+/).filter(Boolean);
+  // "ACD" — letters run together with no separator.
+  if (tokens.length === 1 && /^[A-D]{2,}$/.test(tokens[0])) tokens = tokens[0].split('');
+  const indices = tokens.map(parseCorrect);
+  return indices.length === 0 || indices.some((i) => i === null) ? null : indices;
+}
 
 /** "A"–"D" or "1"–"4" (1 = the first option) → a 0-based index. */
 export function parseCorrect(raw) {
@@ -67,8 +105,37 @@ export function buildRow(cells, index, lineNo) {
   const missing = options.map((o, i) => (o ? null : String.fromCharCode(65 + i))).filter(Boolean);
   if (missing.length) errors.push(`option ${missing.join(', ')} is blank`);
 
-  const correct = parseCorrect(at('correct'));
-  if (correct === null) errors.push(`correct must be A–D or 1–4 (got "${at('correct') || 'blank'}")`);
+  // R19 — Round 1 has three kinds of question; Round 2 only the one, because
+  // its lifelines (50:50, the audience poll) assume a single right answer.
+  const typeRaw = at('type');
+  const question_type = parseType(typeRaw);
+  if (question_type === null) {
+    errors.push(`type must be single, multiple or order (got "${typeRaw}")`);
+  } else if (round === 2 && question_type !== 'single') {
+    errors.push(`round 2 questions are single-correct only (got type "${typeRaw}")`);
+  }
+
+  let correct = null;
+  let correct_answer = null;
+  if (round === 1 && question_type) {
+    const key = parseAnswerKey(at('correct'));
+    if (key && isAnswerComplete(question_type, key, options.length)) {
+      correct_answer = normalizeAnswer(question_type, key);
+    } else {
+      errors.push({
+        single:   `correct must be A–D or 1–4 (got "${at('correct') || 'blank'}")`,
+        multiple: `correct must list every correct option, e.g. "A,C" (got "${at('correct') || 'blank'}")`,
+        order:    `correct must give all four options in order, e.g. "B>D>A>C" (got "${at('correct') || 'blank'}")`,
+      }[question_type]);
+    }
+  } else {
+    correct = parseCorrect(at('correct'));
+    if (correct === null) errors.push(`correct must be A–D or 1–4 (got "${at('correct') || 'blank'}")`);
+  }
+
+  if (round === 1 && at('prize')) {
+    warnings.push('prize ignored — round 1 has no prizes');
+  }
 
   // Optional columns: blank means "use the default", not "zero".
   const pointsRaw = at('base_points');
@@ -115,21 +182,24 @@ export function buildRow(cells, index, lineNo) {
     warnings.push('no ladder_level — this round 2 question is not on the ladder, so the run never reaches it');
   }
 
-  return {
-    lineNo,
-    errors,
-    warnings,
-    row: errors.length ? null : {
-      round,
-      text,
-      options,
-      correct_option: correct,
-      base_points,
-      duration_ms,
-      prize: at('prize') || null,
-      ladder_level,
-    },
-  };
+  // R19 — each round's row carries only the columns its own table has.
+  let row = null;
+  if (!errors.length) {
+    row = round === 1
+      ? { round, question_type, text, options, correct_answer, base_points, duration_ms }
+      : {
+          round,
+          text,
+          options,
+          correct_option: correct,
+          base_points,
+          duration_ms,
+          prize: at('prize') || null,
+          ladder_level,
+        };
+  }
+
+  return { lineNo, errors, warnings, row };
 }
 
 /**

@@ -38,29 +38,35 @@ INSERT INTO participants (roll_no, name) VALUES
 ON CONFLICT (roll_no) DO NOTHING;
 
 
--- ─── Round 1 Questions (5) ──────────────────────────────────
--- Guarded on "this round already has questions" rather than ON CONFLICT:
--- (round, order_index) has no unique index, and it can't have one while
+-- ─── Round 1 Questions (6) ──────────────────────────────────
+-- Two of each type (R19). correct_answer is 0-based option indices: one for
+-- single, the sorted set for multiple, the full sequence for order.
+--
+-- Guarded on "the table already has questions" rather than ON CONFLICT:
+-- order_index has no unique index, and it can't have one while
 -- QuestionManager reorders by swapping the two rows' order_index in
 -- separate statements. Without the guard a second run of this file
 -- duplicates every question, and because both the client and
--- submit_response address the live question by order_index, the two
+-- submit_round1_response address the live question by order_index, the two
 -- copies can resolve differently and every answer is rejected with
 -- "Question is not current".
-INSERT INTO questions (round, text, options, correct_option, base_points, order_index)
+INSERT INTO round1_questions (question_type, text, options, correct_answer, base_points, order_index)
 SELECT * FROM (VALUES
-  (1, 'Which planet is known as the Red Planet?',
-     '["Venus", "Mars", "Jupiter", "Saturn"]'::jsonb, 1, 100, 0),
-  (1, 'What is the chemical symbol for Gold?',
-     '["Ag", "Fe", "Au", "Cu"]'::jsonb, 2, 100, 1),
-  (1, 'Who wrote "Romeo and Juliet"?',
-     '["Charles Dickens", "Mark Twain", "William Shakespeare", "Jane Austen"]'::jsonb, 2, 100, 2),
-  (1, 'What is the largest ocean on Earth?',
-     '["Atlantic Ocean", "Indian Ocean", "Arctic Ocean", "Pacific Ocean"]'::jsonb, 3, 100, 3),
-  (1, 'In which year did India gain independence?',
-     '["1942", "1945", "1947", "1950"]'::jsonb, 2, 100, 4)
-) AS v(round, text, options, correct_option, base_points, order_index)
-WHERE NOT EXISTS (SELECT 1 FROM questions q WHERE q.round = 1);
+  ('single', 'Which planet is known as the Red Planet?',
+     '["Venus", "Mars", "Jupiter", "Saturn"]'::jsonb, '[1]'::jsonb, 100, 0),
+  ('multiple', 'Which of these are prime numbers?',
+     '["2", "9", "13", "21"]'::jsonb, '[0, 2]'::jsonb, 100, 1),
+  ('order', 'Arrange these planets from closest to farthest from the Sun.',
+     '["Earth", "Mercury", "Mars", "Venus"]'::jsonb, '[1, 3, 0, 2]'::jsonb, 100, 2),
+  ('single', 'What is the chemical symbol for Gold?',
+     '["Ag", "Fe", "Au", "Cu"]'::jsonb, '[2]'::jsonb, 100, 3),
+  ('multiple', 'Which of these are noble gases?',
+     '["Neon", "Nitrogen", "Argon", "Helium"]'::jsonb, '[0, 2, 3]'::jsonb, 100, 4),
+  ('order', 'Put these events in chronological order, earliest first.',
+     '["Indian independence", "First Moon landing", "World War I begins", "Fall of the Berlin Wall"]'::jsonb,
+     '[2, 0, 1, 3]'::jsonb, 100, 5)
+) AS v(question_type, text, options, correct_answer, base_points, order_index)
+WHERE NOT EXISTS (SELECT 1 FROM round1_questions);
 
 
 -- ─── Round 2 Questions (5) ──────────────────────────────────
@@ -91,18 +97,16 @@ ON CONFLICT (round) DO NOTHING;
 
 
 -- ─── Sample Responses for Round 1 ──────────────────────────
--- We'll generate ~50 responses: 10 participants answering all 5 round-1 questions
--- Using subqueries to get IDs dynamically
-
--- Helper: create a temp table with participant IDs for the first 10
+-- ~60 responses: 10 participants answering all 6 round-1 questions.
 DO $$
 DECLARE
   v_participants UUID[];
   v_questions    UUID[];
   v_pid          UUID;
   v_qid          UUID;
-  v_correct_opt  INT;
-  v_selected     INT;
+  v_type         TEXT;
+  v_correct      JSONB;
+  v_answer       JSONB;
   v_is_correct   BOOLEAN;
   v_response_ms  INT;
   v_time_pts     NUMERIC;
@@ -110,40 +114,39 @@ DECLARE
   i              INT;
   j              INT;
 BEGIN
-  -- Get first 10 participant IDs
   SELECT array_agg(id ORDER BY roll_no)
   INTO v_participants
   FROM (SELECT id, roll_no FROM participants ORDER BY roll_no LIMIT 10) sub;
 
-  -- Get round 1 question IDs in order
   SELECT array_agg(id ORDER BY order_index)
   INTO v_questions
-  FROM questions WHERE round = 1;
+  FROM round1_questions;
 
-  -- For each participant, answer each question
   FOR i IN 1..array_length(v_participants, 1) LOOP
     v_pid := v_participants[i];
 
     FOR j IN 1..array_length(v_questions, 1) LOOP
       v_qid := v_questions[j];
+      SELECT question_type, correct_answer INTO v_type, v_correct
+      FROM round1_questions WHERE id = v_qid;
 
-      -- Get correct option for this question
-      SELECT correct_option INTO v_correct_opt FROM questions WHERE id = v_qid;
-
-      -- Randomize: ~70% chance of correct answer
+      -- ~70% right. A wrong answer is the sequence reversed for order
+      -- questions, and a lone other option for the rest — neither can
+      -- equal the key.
       IF random() < 0.7 THEN
-        v_selected := v_correct_opt;
+        v_answer := v_correct;
         v_is_correct := true;
+      ELSIF v_type = 'order' THEN
+        SELECT jsonb_agg(e ORDER BY ord DESC) INTO v_answer
+        FROM jsonb_array_elements(v_correct) WITH ORDINALITY AS t(e, ord);
+        v_is_correct := false;
       ELSE
-        -- Pick a wrong option (0-3, excluding correct)
-        v_selected := (v_correct_opt + 1 + floor(random() * 3)::int) % 4;
+        v_answer := jsonb_build_array(((v_correct->>0)::INT + 1) % 4);
         v_is_correct := false;
       END IF;
 
-      -- Random response time between 1500ms and 9500ms
       v_response_ms := 1500 + floor(random() * 8000)::int;
 
-      -- Compute points
       IF v_is_correct THEN
         v_time_pts := 100 * GREATEST(0, 10000 - v_response_ms)::NUMERIC / 10000;
         v_points := ROUND(100 + v_time_pts)::INT;
@@ -151,8 +154,12 @@ BEGIN
         v_points := 0;
       END IF;
 
-      INSERT INTO responses (participant_id, question_id, round, selected_option, is_correct, response_time_ms, points_awarded)
-      VALUES (v_pid, v_qid, 1, v_selected, v_is_correct, v_response_ms, v_points)
+      INSERT INTO responses (participant_id, question_id, round, selected_option, answer, is_correct, response_time_ms, points_awarded)
+      VALUES (
+        v_pid, v_qid, 1,
+        CASE WHEN v_type = 'single' THEN (v_answer->>0)::INT END,
+        v_answer, v_is_correct, v_response_ms, v_points
+      )
       ON CONFLICT (participant_id, question_id) DO NOTHING;
     END LOOP;
   END LOOP;

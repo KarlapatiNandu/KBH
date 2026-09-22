@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS admins (
 -- ─── questions ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS questions (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Round 2 only: Round 1 has its own table, round1_questions (R19)
   round           INT NOT NULL CHECK (round IN (1, 2)),
   text            TEXT NOT NULL,
   options         JSONB NOT NULL,           -- e.g. ["A", "B", "C", "D"]
@@ -60,6 +61,110 @@ CREATE TABLE IF NOT EXISTS questions (
 
 CREATE INDEX IF NOT EXISTS idx_questions_round_order ON questions (round, order_index);
 CREATE INDEX IF NOT EXISTS idx_questions_round_ladder ON questions (round, ladder_level);
+
+DO $$
+BEGIN
+  ALTER TABLE questions ADD CONSTRAINT questions_round2_only CHECK (round = 2);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ─── round1_questions (R19) ─────────────────────────────────
+-- Round 1's three kinds of question. Kept here so a fresh setup needs only
+-- this file; an existing database gets the same thing from migration_v13.sql,
+-- which also explains the answer format.
+
+-- The canonical form of an answer, or NULL if it is not a valid one.
+CREATE OR REPLACE FUNCTION round1_normalize_answer(
+  p_type         TEXT,
+  p_option_count INT,
+  p_answer       JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = public
+AS $$
+DECLARE
+  v_items INT[];
+  v_n     INT;
+BEGIN
+  IF p_answer IS NULL OR jsonb_typeof(p_answer) <> 'array' OR p_option_count IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  -- Whole, non-negative numbers only — checked before anything is cast.
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(p_answer) e
+    WHERE jsonb_typeof(e) <> 'number' OR e::text !~ '^[0-9]{1,3}$'
+  ) THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT array_agg((t.e::text)::INT ORDER BY t.ord)
+    INTO v_items
+  FROM jsonb_array_elements(p_answer) WITH ORDINALITY AS t(e, ord);
+
+  v_n := COALESCE(array_length(v_items, 1), 0);
+  IF v_n = 0 THEN
+    RETURN NULL;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM unnest(v_items) x WHERE x >= p_option_count) THEN
+    RETURN NULL;
+  END IF;
+  IF (SELECT COUNT(DISTINCT x) FROM unnest(v_items) x) <> v_n THEN
+    RETURN NULL;
+  END IF;
+
+  IF p_type = 'single' THEN
+    IF v_n <> 1 THEN RETURN NULL; END IF;
+    RETURN to_jsonb(v_items);
+  ELSIF p_type = 'multiple' THEN
+    RETURN (SELECT to_jsonb(array_agg(x ORDER BY x)) FROM unnest(v_items) x);
+  ELSIF p_type = 'order' THEN
+    IF v_n <> p_option_count THEN RETURN NULL; END IF;
+    RETURN to_jsonb(v_items);
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE TABLE IF NOT EXISTS round1_questions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  question_type   TEXT NOT NULL DEFAULT 'single'
+                    CHECK (question_type IN ('single', 'multiple', 'order')),
+  text            TEXT NOT NULL,
+  options         JSONB NOT NULL
+                    CHECK (jsonb_typeof(options) = 'array'),
+  -- 0-based option indices: [i] single, sorted set multiple, full sequence order
+  correct_answer  JSONB NOT NULL,
+  base_points     INT NOT NULL DEFAULT 100,
+  order_index     INT NOT NULL,
+  duration_ms     INT CHECK (duration_ms IS NULL OR duration_ms > 0),
+  created_at      TIMESTAMPTZ DEFAULT now(),
+
+  CONSTRAINT round1_questions_answer_check CHECK (
+    COALESCE(
+      correct_answer = round1_normalize_answer(
+        question_type,
+        CASE WHEN jsonb_typeof(options) = 'array' THEN jsonb_array_length(options) END,
+        correct_answer
+      ),
+      false
+    )
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_round1_questions_order ON round1_questions (order_index);
+
+-- Both rounds' questions as one list, for the round lifecycle RPCs.
+CREATE OR REPLACE VIEW round_questions AS
+  SELECT id, 1 AS round, order_index, duration_ms, base_points, created_at
+  FROM round1_questions
+  UNION ALL
+  SELECT id, round, order_index, duration_ms, base_points, created_at
+  FROM questions;
 
 -- ─── round_state ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS round_state (
@@ -86,9 +191,12 @@ CREATE TABLE IF NOT EXISTS round_state (
 CREATE TABLE IF NOT EXISTS responses (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   participant_id    UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-  question_id       UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+  -- A question in round1_questions or questions, so no FK: the delete
+  -- triggers below stand in for ON DELETE CASCADE. (R19)
+  question_id       UUID NOT NULL,
   round             INT NOT NULL CHECK (round IN (1, 2)),
-  selected_option   INT NOT NULL,
+  selected_option   INT,                    -- Round 2 (and single-correct Round 1)
+  answer            JSONB,                  -- Round 1: option indices, see round1_normalize_answer
   is_correct        BOOLEAN NOT NULL,
   response_time_ms  INT NOT NULL,           -- client-measured, server-clamped (R6)
   points_awarded    INT NOT NULL DEFAULT 0,
@@ -99,17 +207,45 @@ CREATE TABLE IF NOT EXISTS responses (
   revealed_at       TIMESTAMPTZ,
 
   -- Block duplicate submissions
-  UNIQUE (participant_id, question_id)
+  UNIQUE (participant_id, question_id),
+  CONSTRAINT responses_has_answer_check
+    CHECK (selected_option IS NOT NULL OR answer IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_responses_participant ON responses (participant_id);
 CREATE INDEX IF NOT EXISTS idx_responses_question    ON responses (question_id);
 CREATE INDEX IF NOT EXISTS idx_responses_round       ON responses (round);
 
+-- ON DELETE CASCADE for both question tables. SECURITY DEFINER because anon
+-- cannot delete from responses, and the admin console deletes questions
+-- with the anon key.
+CREATE OR REPLACE FUNCTION delete_question_responses()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  DELETE FROM responses WHERE question_id = OLD.id;
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_questions_delete_responses ON questions;
+CREATE TRIGGER trg_questions_delete_responses
+  AFTER DELETE ON questions
+  FOR EACH ROW EXECUTE FUNCTION delete_question_responses();
+
+DROP TRIGGER IF EXISTS trg_round1_questions_delete_responses ON round1_questions;
+CREATE TRIGGER trg_round1_questions_delete_responses
+  AFTER DELETE ON round1_questions
+  FOR EACH ROW EXECUTE FUNCTION delete_question_responses();
+
 -- ─── RLS (simple for v1) ────────────────────────────────────
 -- Enable RLS on all tables
 ALTER TABLE participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE questions    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE round1_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE round_state  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE responses    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE admins       ENABLE ROW LEVEL SECURITY;
@@ -126,6 +262,9 @@ CREATE POLICY "Open access on participants" ON participants
   FOR ALL USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Admin full access on questions" ON questions;
 CREATE POLICY "Open access on questions" ON questions
+  FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Open access on round1_questions" ON round1_questions;
+CREATE POLICY "Open access on round1_questions" ON round1_questions
   FOR ALL USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Admin full access on round_state" ON round_state;
 CREATE POLICY "Open access on round_state" ON round_state

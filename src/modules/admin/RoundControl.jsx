@@ -56,21 +56,24 @@ export default function RoundControl() {
   }, []);
 
   const fetchQuestions = useCallback(async () => {
-    const { data } = await supabase
-      .from('questions')
-      // `select('*')`, not a column list. Naming `ladder_level` (R16) makes
-      // the whole read fail on a database that has not run migration_v11,
-      // and a failed read here reads back as "this round has no questions" —
-      // the same trap HotSeatAnswerPanel documents for `revealed_at`. The
-      // extra columns cost nothing; the panels take what they need.
-      .select('*')
-      .order('order_index');
-    if (data) {
-      setQuestions({
-        1: data.filter((q) => q.round === 1),
-        2: data.filter((q) => q.round === 2),
-      });
-    }
+    const [r1, r2] = await Promise.all([
+      // R19 — Round 1 has its own table.
+      supabase.from('round1_questions').select('*').order('order_index'),
+      supabase
+        .from('questions')
+        // `select('*')`, not a column list. Naming `ladder_level` (R16) makes
+        // the whole read fail on a database that has not run migration_v11,
+        // and a failed read here reads back as "this round has no questions" —
+        // the same trap HotSeatAnswerPanel documents for `revealed_at`. The
+        // extra columns cost nothing; the panels take what they need.
+        .select('*')
+        .eq('round', 2)
+        .order('order_index'),
+    ]);
+    setQuestions((prev) => ({
+      1: r1.data ? r1.data.map((q) => ({ ...q, round: 1 })) : prev[1],
+      2: r2.data || prev[2],
+    }));
   }, []);
 
   useEffect(() => {

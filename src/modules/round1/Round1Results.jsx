@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { QUESTION_TYPES, formatAnswer, responseAnswer, typeOf } from './answers';
 
 /**
  * Module 4 — Round1Results
@@ -14,8 +15,6 @@ import { supabase } from '../../lib/supabase';
  *   questions   — all round-1 questions array
  *   onBack()    — callback to return to home
  */
-
-const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
 export default function Round1Results({ participant, questions, onBack }) {
   const [myResponses, setMyResponses] = useState([]);
@@ -157,9 +156,10 @@ export default function Round1Results({ participant, questions, onBack }) {
                 </div>
                 {resp && (
                   <div className="r1r-q-detail">
-                    <span>Your answer: <strong>{OPTION_LABELS[resp.selected_option]}</strong></span>
+                    <span className="r1r-q-type">{QUESTION_TYPES[typeOf(q)].label}</span>
+                    <span>Your answer: <strong>{formatAnswer(typeOf(q), responseAnswer(resp))}</strong></span>
                     {!resp.is_correct && (
-                      <span>Correct: <strong>{OPTION_LABELS[q.correct_option]}</strong></span>
+                      <span>Correct: <strong>{formatAnswer(typeOf(q), q.correct_answer)}</strong></span>
                     )}
                     <span>+{resp.points_awarded} pts</span>
                     <span>{(resp.response_time_ms / 1000).toFixed(1)}s</span>
@@ -380,6 +380,11 @@ export default function Round1Results({ participant, questions, onBack }) {
           font-family: 'Inter', sans-serif;
           font-size: 13px;
           color: var(--pale-gold);
+        }
+
+        .r1r-q-type {
+          color: var(--spotlight-gold);
+          font-weight: 600;
         }
 
         /* Leaderboard */

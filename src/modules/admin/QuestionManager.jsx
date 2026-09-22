@@ -2,6 +2,15 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import QuestionCsvImport from './QuestionCsvImport';
 import { hasRungColumn } from './tiers';
+import {
+  QUESTION_TYPES,
+  TYPE_KEYS,
+  optionLabel,
+  typeOf,
+  normalizeAnswer,
+  isAnswerComplete,
+  formatAnswer,
+} from '../round1/answers';
 
 /**
  * Declared at module scope on purpose: defining it inside QuestionManager
@@ -39,6 +48,97 @@ function OptionEditor({ options, correctOption, onChange, onCorrectChange }) {
   );
 }
 
+
+/**
+ * R19 — Round 1's option editor, for all three question types. The button
+ * beside each option marks the answer key:
+ *   single   — the one correct option (as OptionEditor does for Round 2)
+ *   multiple — every correct option, toggled on and off
+ *   order    — clicked in the correct sequence; each shows its place, and
+ *              clicking a placed option takes it back out
+ *
+ * The options are stored in the order they are typed here, which is the order
+ * participants see them in — so for an order question, type them jumbled.
+ */
+function Round1AnswerEditor({ type, options, answer, onChange, onAnswerChange }) {
+  const mark = (i) => {
+    if (type === 'single') return onAnswerChange([i]);
+    onAnswerChange(answer.includes(i) ? answer.filter((x) => x !== i) : [...answer, i]);
+  };
+
+  return (
+    <div className="option-editor">
+      {options.map((opt, i) => {
+        const position = answer.indexOf(i);
+        const on = position !== -1;
+        return (
+          <div key={i} className="option-row">
+            <span className="option-label">{optionLabel(i)}</span>
+            <input
+              type="text"
+              className="form-input option-input"
+              value={opt}
+              onChange={(e) => {
+                const updated = [...options];
+                updated[i] = e.target.value;
+                onChange(updated);
+              }}
+              placeholder={`Option ${optionLabel(i)}`}
+            />
+            <button
+              type="button"
+              className={`btn-correct ${on ? 'btn-correct--active' : ''}`}
+              onClick={() => mark(i)}
+              title={
+                type === 'order'
+                  ? on ? 'Take out of the order' : 'Put next in the order'
+                  : 'Mark as correct'
+              }
+            >
+              {type === 'order' ? (on ? position + 1 : '+') : '✓'}
+            </button>
+          </div>
+        );
+      })}
+
+      {type === 'order' && (
+        <p className="qm-answer-note">
+          {answer.length < options.length
+            ? `${answer.length} of ${options.length} placed — click + beside each option in the correct order.`
+            : `Correct order: ${formatAnswer(type, answer)}`}
+          {answer.length > 0 && (
+            <button type="button" className="qm-answer-reset" onClick={() => onAnswerChange([])}>
+              Reset
+            </button>
+          )}
+        </p>
+      )}
+      {type === 'multiple' && answer.length === 0 && (
+        <p className="qm-answer-note">Mark at least one correct option.</p>
+      )}
+    </div>
+  );
+}
+
+// R19 — switching type starts the key over rather than guessing what an
+// answer of one kind means as another.
+const blankAnswer = (type) => (type === 'single' ? [0] : []);
+
+function TypePicker({ value, onChange }) {
+  return (
+    <select className="form-select" value={value} onChange={(e) => onChange(e.target.value)}>
+      {TYPE_KEYS.map((t) => (
+        <option key={t} value={t}>{QUESTION_TYPES[t].label}</option>
+      ))}
+    </select>
+  );
+}
+
+const optionsLabel = (round, type) => {
+  if (round !== 1 || type === 'single') return 'Options (click ✓ to mark correct)';
+  if (type === 'multiple') return 'Options (click ✓ on every correct one)';
+  return 'Options (click + in the correct order)';
+};
 
 /**
  * R16 — which prize rung a Round 2 question is played for. A list of the
@@ -83,11 +183,15 @@ function RungPicker({ value, rungs, onChange }) {
 // round default" (round_state.question_duration_ms). Prize is free text.
 // R16 — ladder_level is held as a string while it is a form field, blank for
 // "not on the ladder", and turned into a number or NULL on save.
+// R19 — question_type and correct_answer are Round 1's; correct_option is
+// Round 2's. Both are kept in the form so switching round loses nothing.
 const EMPTY_QUESTION = {
   round: 1,
   text: '',
   options: ['', '', '', ''],
   correct_option: 0,
+  question_type: 'single',
+  correct_answer: [0],
   base_points: 100,
   duration_s: '',
   prize: '',
@@ -104,6 +208,13 @@ const toRung = (v) => {
   const n = parseInt(v, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+
+// R19 — Round 1 lives in its own table.
+const tableFor = (round) => (round === 1 ? 'round1_questions' : 'questions');
+
+/** Whether the form's answer key is complete enough to save. */
+const answerReady = (form) =>
+  form.round !== 1 || isAnswerComplete(form.question_type, form.correct_answer, form.options.length);
 
 export default function QuestionManager() {
   const [questions, setQuestions] = useState([]);
@@ -142,16 +253,16 @@ export default function QuestionManager() {
 
   const fetchQuestions = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('questions')
-      .select('*')
-      .order('round', { ascending: true })
-      .order('order_index', { ascending: true });
+    const [r1, r2] = await Promise.all([
+      supabase.from('round1_questions').select('*').order('order_index', { ascending: true }),
+      supabase.from('questions').select('*').eq('round', 2).order('order_index', { ascending: true }),
+    ]);
 
-    if (error) {
+    if (r1.error || r2.error) {
       showToast('Failed to load questions', 'error');
     } else {
-      setQuestions(data || []);
+      // round1_questions has no `round` column; the list and forms key on it.
+      setQuestions([...r1.data.map((q) => ({ ...q, round: 1 })), ...r2.data]);
     }
     setLoading(false);
   };
@@ -164,14 +275,44 @@ export default function QuestionManager() {
   // without migration_v11 fails the whole statement, which would break adding
   // and editing every question, not just the rung. So the field is hidden and
   // left out of the payload until the column is actually there.
-  const canFileRungs = hasRungColumn(questions);
+  const canFileRungs = hasRungColumn(questions.filter((q) => q.round === 2));
+
+  /**
+   * The columns a form writes, for whichever table its round lives in.
+   * Round 1 has no prize or rung (R16, R19); Round 2 has one correct option.
+   */
+  const payloadFor = (form) => {
+    const common = {
+      text: form.text,
+      options: form.options,
+      base_points: form.base_points,
+      duration_ms: secondsToMs(form.duration_s),
+    };
+
+    if (form.round === 1) {
+      return {
+        ...common,
+        question_type: form.question_type,
+        correct_answer: normalizeAnswer(form.question_type, form.correct_answer),
+      };
+    }
+
+    return {
+      ...common,
+      correct_option: form.correct_option,
+      prize: form.prize.trim() || null,
+      ...(canFileRungs ? { ladder_level: toRung(form.ladder_level) } : {}),
+    };
+  };
 
   const startEdit = (q) => {
     setEditingId(q.id);
     setEditForm({
       text: q.text,
       options: [...q.options],
-      correct_option: q.correct_option,
+      correct_option: q.correct_option ?? 0,
+      question_type: typeOf(q),
+      correct_answer: q.correct_answer ? [...q.correct_answer] : [0],
       base_points: q.base_points,
       duration_s: msToSeconds(q.duration_ms),
       prize: q.prize ?? '',
@@ -187,20 +328,8 @@ export default function QuestionManager() {
 
   const saveEdit = async (id) => {
     const { error } = await supabase
-      .from('questions')
-      .update({
-        text: editForm.text,
-        options: editForm.options,
-        correct_option: editForm.correct_option,
-        base_points: editForm.base_points,
-        duration_ms: secondsToMs(editForm.duration_s),
-        prize: editForm.prize.trim() || null,
-        // Round 1 has no ladder, so a rung on one of its questions is noise
-        // that the console would have to filter out again. (R16)
-        ...(canFileRungs
-          ? { ladder_level: editForm.round === 2 ? toRung(editForm.ladder_level) : null }
-          : {}),
-      })
+      .from(tableFor(editForm.round))
+      .update(payloadFor(editForm))
       .eq('id', id);
 
     if (error) {
@@ -215,7 +344,7 @@ export default function QuestionManager() {
   const deleteQuestion = async (question) => {
     if (!window.confirm('Delete this question? This cannot be undone.')) return;
 
-    const { error } = await supabase.from('questions').delete().eq('id', question.id);
+    const { error } = await supabase.from(tableFor(question.round)).delete().eq('id', question.id);
     if (error) {
       showToast('Failed to delete question', 'error');
       return;
@@ -244,17 +373,9 @@ export default function QuestionManager() {
       ? Math.max(...roundQs.map((q) => q.order_index))
       : -1;
 
-    const { error } = await supabase.from('questions').insert({
-      round: newQuestion.round,
-      text: newQuestion.text,
-      options: newQuestion.options,
-      correct_option: newQuestion.correct_option,
-      base_points: newQuestion.base_points,
-      duration_ms: secondsToMs(newQuestion.duration_s),
-      prize: newQuestion.prize.trim() || null,
-      ...(canFileRungs
-        ? { ladder_level: newQuestion.round === 2 ? toRung(newQuestion.ladder_level) : null }
-        : {}),
+    const { error } = await supabase.from(tableFor(newQuestion.round)).insert({
+      ...payloadFor(newQuestion),
+      ...(newQuestion.round === 2 ? { round: 2 } : {}),
       order_index: maxOrder + 1,
     });
 
@@ -281,8 +402,9 @@ export default function QuestionManager() {
     const other = roundQs[swapIdx];
 
     // Swap order_index values
-    await supabase.from('questions').update({ order_index: other.order_index }).eq('id', q.id);
-    await supabase.from('questions').update({ order_index: q.order_index }).eq('id', other.id);
+    const table = tableFor(q.round);
+    await supabase.from(table).update({ order_index: other.order_index }).eq('id', q.id);
+    await supabase.from(table).update({ order_index: q.order_index }).eq('id', other.id);
 
     fetchQuestions();
   };
@@ -348,6 +470,16 @@ export default function QuestionManager() {
                   <option value={2}>Round 2</option>
                 </select>
               </div>
+              {/* R19 — Round 2 is always single-correct: its lifelines assume it. */}
+              {newQuestion.round === 1 && (
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Type</label>
+                  <TypePicker
+                    value={newQuestion.question_type}
+                    onChange={(t) => setNewQuestion({ ...newQuestion, question_type: t, correct_answer: blankAnswer(t) })}
+                  />
+                </div>
+              )}
               <div className="form-group" style={{ flex: 1 }}>
                 <label className="form-label">Base Points</label>
                 <input
@@ -369,16 +501,18 @@ export default function QuestionManager() {
                   onChange={(e) => setNewQuestion({ ...newQuestion, duration_s: e.target.value })}
                 />
               </div>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Prize</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. ₹10,000"
-                  value={newQuestion.prize}
-                  onChange={(e) => setNewQuestion({ ...newQuestion, prize: e.target.value })}
-                />
-              </div>
+              {newQuestion.round === 2 && (
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label className="form-label">Prize</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. ₹10,000"
+                    value={newQuestion.prize}
+                    onChange={(e) => setNewQuestion({ ...newQuestion, prize: e.target.value })}
+                  />
+                </div>
+              )}
               {/* R16 — Round 2 only: Round 1 is a fixed queue with no ladder
                   behind it, so there is no rung to play a question for. */}
               {newQuestion.round === 2 && canFileRungs && (
@@ -403,20 +537,34 @@ export default function QuestionManager() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Options (click ✓ to mark correct)</label>
-              <OptionEditor
-                options={newQuestion.options}
-                correctOption={newQuestion.correct_option}
-                onChange={(options) => setNewQuestion({ ...newQuestion, options })}
-                onCorrectChange={(i) => setNewQuestion({ ...newQuestion, correct_option: i })}
-              />
+              <label className="form-label">{optionsLabel(newQuestion.round, newQuestion.question_type)}</label>
+              {newQuestion.round === 1 ? (
+                <Round1AnswerEditor
+                  type={newQuestion.question_type}
+                  options={newQuestion.options}
+                  answer={newQuestion.correct_answer}
+                  onChange={(options) => setNewQuestion({ ...newQuestion, options })}
+                  onAnswerChange={(a) => setNewQuestion({ ...newQuestion, correct_answer: a })}
+                />
+              ) : (
+                <OptionEditor
+                  options={newQuestion.options}
+                  correctOption={newQuestion.correct_option}
+                  onChange={(options) => setNewQuestion({ ...newQuestion, options })}
+                  onCorrectChange={(i) => setNewQuestion({ ...newQuestion, correct_option: i })}
+                />
+              )}
             </div>
             <div className="qm-add-actions">
               <button className="btn btn-secondary btn-sm" onClick={() => setShowAdd(false)}>Cancel</button>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={addQuestion}
-                disabled={!newQuestion.text.trim() || newQuestion.options.some((o) => !o.trim())}
+                disabled={
+                  !newQuestion.text.trim() ||
+                  newQuestion.options.some((o) => !o.trim()) ||
+                  !answerReady(newQuestion)
+                }
               >
                 Add Question
               </button>
@@ -440,6 +588,9 @@ export default function QuestionManager() {
                     Round {q.round}
                   </span>
                   <span className="qm-order">#{q.order_index + 1}</span>
+                  {q.round === 1 && (
+                    <span className={`qm-type qm-type--${typeOf(q)}`}>{QUESTION_TYPES[typeOf(q)].label}</span>
+                  )}
                   <span className="qm-points">{q.base_points} pts</span>
                   <span className="qm-points" title="Countdown for this question">
                     ⏱ {q.duration_ms != null ? `${q.duration_ms / 1000}s` : 'default'}
@@ -465,7 +616,14 @@ export default function QuestionManager() {
                   <button className="btn-icon" onClick={() => moveQuestion(q, 1)} title="Move down">↓</button>
                   {editingId === q.id ? (
                     <>
-                      <button className="btn btn-primary btn-sm" onClick={() => saveEdit(q.id)}>Save</button>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => saveEdit(q.id)}
+                        disabled={!answerReady(editForm)}
+                        title={answerReady(editForm) ? undefined : 'Finish marking the answer first'}
+                      >
+                        Save
+                      </button>
                       <button className="btn btn-secondary btn-sm" onClick={cancelEdit}>Cancel</button>
                     </>
                   ) : (
@@ -489,6 +647,15 @@ export default function QuestionManager() {
                     />
                   </div>
                   <div className="qm-add-row">
+                    {q.round === 1 && (
+                      <div className="form-group" style={{ flex: 1 }}>
+                        <label className="form-label">Type</label>
+                        <TypePicker
+                          value={editForm.question_type}
+                          onChange={(t) => setEditForm({ ...editForm, question_type: t, correct_answer: blankAnswer(t) })}
+                        />
+                      </div>
+                    )}
                     <div className="form-group" style={{ flex: 1 }}>
                       <label className="form-label">Base Points</label>
                       <input
@@ -510,16 +677,18 @@ export default function QuestionManager() {
                         onChange={(e) => setEditForm({ ...editForm, duration_s: e.target.value })}
                       />
                     </div>
-                    <div className="form-group" style={{ flex: 1 }}>
-                      <label className="form-label">Prize</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. ₹10,000"
-                        value={editForm.prize}
-                        onChange={(e) => setEditForm({ ...editForm, prize: e.target.value })}
-                      />
-                    </div>
+                    {q.round === 2 && (
+                      <div className="form-group" style={{ flex: 1 }}>
+                        <label className="form-label">Prize</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="e.g. ₹10,000"
+                          value={editForm.prize}
+                          onChange={(e) => setEditForm({ ...editForm, prize: e.target.value })}
+                        />
+                      </div>
+                    )}
                     {q.round === 2 && canFileRungs && (
                       <div className="form-group" style={{ flex: 1 }}>
                         <label className="form-label">Prize rung</label>
@@ -532,27 +701,49 @@ export default function QuestionManager() {
                     )}
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Options</label>
-                    <OptionEditor
-                      options={editForm.options}
-                      correctOption={editForm.correct_option}
-                      onChange={(options) => setEditForm({ ...editForm, options })}
-                      onCorrectChange={(i) => setEditForm({ ...editForm, correct_option: i })}
-                    />
+                    <label className="form-label">{optionsLabel(q.round, editForm.question_type)}</label>
+                    {q.round === 1 ? (
+                      <Round1AnswerEditor
+                        type={editForm.question_type}
+                        options={editForm.options}
+                        answer={editForm.correct_answer}
+                        onChange={(options) => setEditForm({ ...editForm, options })}
+                        onAnswerChange={(a) => setEditForm({ ...editForm, correct_answer: a })}
+                      />
+                    ) : (
+                      <OptionEditor
+                        options={editForm.options}
+                        correctOption={editForm.correct_option}
+                        onChange={(options) => setEditForm({ ...editForm, options })}
+                        onCorrectChange={(i) => setEditForm({ ...editForm, correct_option: i })}
+                      />
+                    )}
                   </div>
                 </div>
               ) : (
                 <div className="qm-item-body">
                   <p className="qm-question-text">{q.text}</p>
                   <div className="qm-options">
-                    {q.options.map((opt, i) => (
-                      <span key={i} className={`qm-option ${i === q.correct_option ? 'qm-option--correct' : ''}`}>
-                        <span className="qm-option-letter">{String.fromCharCode(65 + i)}</span>
-                        {opt}
-                        {i === q.correct_option && <span className="qm-check">✓</span>}
-                      </span>
-                    ))}
+                    {q.options.map((opt, i) => {
+                      // R19 — Round 1's key is a list; an order question marks
+                      // each option with its place instead of a tick.
+                      const key = q.round === 1 ? q.correct_answer || [] : [q.correct_option];
+                      const position = key.indexOf(i);
+                      const isOrder = q.round === 1 && typeOf(q) === 'order';
+                      return (
+                        <span key={i} className={`qm-option ${position !== -1 && !isOrder ? 'qm-option--correct' : ''}`}>
+                          <span className="qm-option-letter">{optionLabel(i)}</span>
+                          {opt}
+                          {position !== -1 && (
+                            <span className={isOrder ? 'qm-seq' : 'qm-check'}>{isOrder ? position + 1 : '✓'}</span>
+                          )}
+                        </span>
+                      );
+                    })}
                   </div>
+                  {q.round === 1 && typeOf(q) === 'order' && (
+                    <p className="qm-answer-note">Correct order: {formatAnswer('order', q.correct_answer)}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -703,6 +894,7 @@ export default function QuestionManager() {
           display: flex;
           align-items: center;
           gap: var(--space-sm);
+          flex-wrap: wrap;
         }
 
         .qm-order {
@@ -739,6 +931,58 @@ export default function QuestionManager() {
         .qm-rung--unfiled {
           border-color: var(--warning-amber);
           color: var(--warning-amber);
+        }
+
+        /* R19 */
+        .qm-type {
+          font-size: 11px;
+          font-weight: 600;
+          padding: 2px 8px;
+          border-radius: var(--radius-pill);
+          border: 1px solid rgba(242,183,5,0.3);
+          color: var(--pale-gold);
+          white-space: nowrap;
+        }
+
+        .qm-type--multiple,
+        .qm-type--order {
+          border-color: var(--spotlight-gold);
+          color: var(--spotlight-gold);
+        }
+
+        .qm-seq {
+          margin-left: auto;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: var(--spotlight-gold);
+          color: var(--deep-midnight);
+          font-weight: 700;
+          font-size: 11px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+
+        .qm-answer-note {
+          display: flex;
+          align-items: center;
+          gap: var(--space-sm);
+          flex-wrap: wrap;
+          margin-top: var(--space-xs);
+          font-size: 12px;
+          color: var(--pale-gold);
+        }
+
+        .qm-answer-reset {
+          background: none;
+          border: none;
+          padding: 0;
+          color: var(--spotlight-gold);
+          font-size: 12px;
+          cursor: pointer;
+          text-decoration: underline;
         }
 
         .qm-item-actions {

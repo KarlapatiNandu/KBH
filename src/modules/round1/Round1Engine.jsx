@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import QuestionCard from './QuestionCard';
 import TimerRing from './TimerRing';
 import Round1Results from './Round1Results';
+import { answersEqual, responseAnswer, typeOf } from './answers';
 
 /**
  * Module 4 — Round1Engine
@@ -37,7 +38,8 @@ export default function Round1Engine({ participant }) {
 
   // Game state
   const [gamePhase, setGamePhase] = useState('loading'); // loading | waiting | active | transition | held | completed
-  const [selectedOption, setSelectedOption] = useState(null);
+  // R19 — the locked-in answer, as an array of option indices (answers.js)
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [lastResult, setLastResult] = useState(null);
   const [hasAnswered, setHasAnswered] = useState(false);
   // The verdict is held back until the countdown ends: picking an option
@@ -60,10 +62,10 @@ export default function Round1Engine({ participant }) {
   // ─── Load questions ──────────────────────────────────────────
   useEffect(() => {
     async function loadQuestions() {
+      // R19 — Round 1 has its own table.
       const { data, error: fetchError } = await supabase
-        .from('questions')
+        .from('round1_questions')
         .select('*')
-        .eq('round', 1)
         .order('order_index');
 
       if (fetchError) {
@@ -172,7 +174,7 @@ export default function Round1Engine({ participant }) {
     setQuestionAnchor(anchoredAt);
 
     answeredQuestionsRef.current.delete(currentQ.id);
-    setSelectedOption(null);
+    setSelectedAnswer(null);
     setLastResult(null);
     setHasAnswered(false);
     setRevealed(false);
@@ -183,7 +185,7 @@ export default function Round1Engine({ participant }) {
     checkExistingResponse(currentQ.id).then((existing) => {
       if (!existing) return;
       answeredQuestionsRef.current.add(currentQ.id);
-      setSelectedOption(existing.selected_option);
+      setSelectedAnswer(responseAnswer(existing));
       setLastResult({
         is_correct: existing.is_correct,
         points_awarded: existing.points_awarded,
@@ -194,7 +196,7 @@ export default function Round1Engine({ participant }) {
   }, [roundState, questionsLoaded, questions, checkExistingResponse]);
 
   // ─── Handle answer submission ────────────────────────────────
-  const handleAnswer = useCallback(async (optionIndex) => {
+  const handleAnswer = useCallback(async (answer) => {
     if (hasAnswered || !roundState || gamePhase !== 'active') return;
 
     const currentQ = questions.find(
@@ -202,7 +204,7 @@ export default function Round1Engine({ participant }) {
     );
     if (!currentQ) return;
 
-    setSelectedOption(optionIndex);
+    setSelectedAnswer(answer);
     setHasAnswered(true);
 
     // R6 - response time measured on this client, from the moment the question
@@ -212,17 +214,17 @@ export default function Round1Engine({ participant }) {
     const responseTimeMs = Math.min(Math.max(Math.round(elapsedMs), 0), durationMs);
 
     try {
-      const { data, error: rpcError } = await supabase.rpc('submit_response', {
+      const { data, error: rpcError } = await supabase.rpc('submit_round1_response', {
         p_participant_id: participant.participant_id,
         p_question_id: currentQ.id,
-        p_selected_option: optionIndex,
+        p_answer: answer,
         p_response_time_ms: responseTimeMs,
       });
 
       if (rpcError) {
         setError(`Submit failed: ${rpcError.message}`);
         setLastResult({
-          is_correct: optionIndex === currentQ.correct_option,
+          is_correct: answersEqual(typeOf(currentQ), answer, currentQ.correct_answer),
           points_awarded: 0,
           response_time_ms: 0,
         });
@@ -246,7 +248,7 @@ export default function Round1Engine({ participant }) {
           const existing = await checkExistingResponse(currentQ.id);
           if (existing) {
             answeredQuestionsRef.current.add(currentQ.id);
-            setSelectedOption(existing.selected_option);
+            setSelectedAnswer(responseAnswer(existing));
             setLastResult({
               is_correct: existing.is_correct,
               points_awarded: existing.points_awarded,
@@ -409,6 +411,9 @@ export default function Round1Engine({ participant }) {
           <div className="r1-question-col">
             {currentQuestion ? (
               <QuestionCard
+                // Fresh per serve: unlocked picks on a multiple / order
+                // question must not carry over to the next one. (R19)
+                key={`${currentQuestion.id}:${roundState.question_started_at}`}
                 question={currentQuestion}
                 questionNumber={currentQuestionNumber}
                 totalQuestions={questions.length}
@@ -416,7 +421,7 @@ export default function Round1Engine({ participant }) {
                 disabled={hasAnswered || gamePhase !== 'active'}
                 lastResult={lastResult}
                 revealed={revealed}
-                selectedOption={selectedOption}
+                selectedAnswer={selectedAnswer}
               />
             ) : (
               <div className="r1-center">

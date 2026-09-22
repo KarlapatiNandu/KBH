@@ -1,24 +1,40 @@
 import { useState } from 'react';
+import {
+  QUESTION_TYPES,
+  optionLabel,
+  typeOf,
+  normalizeAnswer,
+  isAnswerComplete,
+  formatAnswer,
+} from './answers';
 
 /**
  * Module 4 — QuestionCard
  *
- * Renders one question with its 4 option pills.
- * After the participant selects an answer, it calls onAnswer and shows feedback.
+ * Renders one question with its option pills.
+ * After the participant locks in an answer, it calls onAnswer and shows feedback.
+ *
+ * R19 — three kinds of question (see answers.js):
+ *   single   — tapping an option locks it in, as it always has.
+ *   multiple — taps toggle options on and off; Lock in submits the set.
+ *   order    — taps number the options 1, 2, 3…; tapping a numbered option
+ *              takes it back out. Lock in submits once every option has a
+ *              place. Tap-to-number rather than drag-to-sort because it
+ *              works the same with a thumb on a phone as with a mouse.
  *
  * Props:
- *   question        — {id, text, options, correct_option, base_points, order_index}
+ *   question        — a round1_questions row
  *   questionNumber  — 1-indexed display number
- *   totalQuestions   — total question count
- *   onAnswer(index) — callback when an option is selected
+ *   totalQuestions  — total question count
+ *   onAnswer(answer) — callback with the answer array once locked in
  *   disabled        — true after answering or time's up
  *   lastResult      — {is_correct, points_awarded, response_time_ms} or null
  *   revealed        — true once the countdown has ended; until then a pick
  *                     only lights the option gold and the verdict is hidden
- *   selectedOption  — the index the user picked (or null)
+ *   selectedAnswer  — the answer array locked in (or null)
+ *
+ * Mount it with a key per served question: the unlocked picks live here.
  */
-
-const OPTION_LABELS = ['A', 'B', 'C', 'D'];
 
 export default function QuestionCard({
   question,
@@ -28,15 +44,38 @@ export default function QuestionCard({
   disabled,
   lastResult,
   revealed = false,
-  selectedOption,
+  selectedAnswer,
 }) {
   const [submitting, setSubmitting] = useState(false);
+  // Picks not yet locked in — multiple and order only.
+  const [draft, setDraft] = useState([]);
 
-  const handleSelect = async (index) => {
-    if (disabled || submitting || selectedOption !== null) return;
+  const type = typeOf(question);
+  const optionCount = question.options.length;
+  const correct = question.correct_answer || [];
+  const locked = selectedAnswer != null;
+  const inputOpen = !disabled && !submitting && !locked;
+  // What the pills are marked with: the locked answer, or the picks so far.
+  const marked = locked ? selectedAnswer : draft;
+
+  const submit = async (answer) => {
+    if (!inputOpen || !isAnswerComplete(type, answer, optionCount)) return;
     setSubmitting(true);
-    await onAnswer(index);
+    await onAnswer(normalizeAnswer(type, answer));
     setSubmitting(false);
+  };
+
+  const handleTap = (index) => {
+    if (!inputOpen) return;
+
+    if (type === 'single') {
+      submit([index]);
+      return;
+    }
+
+    // Toggling suits both: a set loses the option, a sequence closes up
+    // behind it.
+    setDraft((d) => (d.includes(index) ? d.filter((i) => i !== index) : [...d, index]));
   };
 
   // Reveal is gated on the countdown, not on the pick: the verdict only
@@ -46,29 +85,30 @@ export default function QuestionCard({
   // Derive pill styling based on state
   const getPillClass = (index) => {
     const classes = ['pill', 'qc-pill'];
-
-    if (selectedOption === null) {
-      // No answer yet — default styling
-      return classes.join(' ');
-    }
+    const isMarked = marked.includes(index);
 
     if (showVerdict) {
-      if (index === question.correct_option) {
+      if (type === 'order') {
+        classes.push(marked.indexOf(index) === correct.indexOf(index) ? 'qc-pill--correct' : 'qc-pill--wrong');
+      } else if (correct.includes(index)) {
         classes.push('qc-pill--correct');
-      } else if (index === selectedOption && !lastResult.is_correct) {
+      } else if (isMarked) {
         classes.push('qc-pill--wrong');
       } else {
         classes.push('qc-pill--faded');
       }
-    } else if (index === selectedOption) {
+    } else if (locked) {
       // Locked in, verdict pending — the gold highlight
-      classes.push('qc-pill--locked');
-    } else {
-      classes.push('qc-pill--dimmed');
+      classes.push(isMarked ? 'qc-pill--locked' : 'qc-pill--dimmed');
+    } else if (isMarked) {
+      classes.push('qc-pill--picked');
     }
 
     return classes.join(' ');
   };
+
+  const hint = QUESTION_TYPES[type].hint;
+  const answerWord = type === 'order' ? 'order' : 'answer';
 
   return (
     <div className="q-card qc-card">
@@ -78,39 +118,95 @@ export default function QuestionCard({
         <span className="qc-counter">
           Question {questionNumber} of {totalQuestions}
         </span>
+        <span className={`qc-type qc-type--${type}`}>{QUESTION_TYPES[type].label}</span>
         <span className="qc-points">{question.base_points} pts</span>
       </div>
 
       {/* Question text */}
       <p className="q-text">{question.text}</p>
+      {hint && !locked && <p className="qc-hint">{hint}</p>}
 
       {/* Options */}
       <div className="options-grid">
-        {question.options.map((option, index) => (
-          <button
-            key={index}
-            className={getPillClass(index)}
-            onClick={() => handleSelect(index)}
-            disabled={disabled || submitting || selectedOption !== null}
-          >
-            <span className="pill-num">{OPTION_LABELS[index]}</span>
-            <span className="qc-option-text">{option}</span>
-            {/* Feedback icon */}
-            {showVerdict && index === question.correct_option && (
-              <span className="qc-feedback-icon qc-feedback-icon--correct">✓</span>
-            )}
-            {showVerdict && index === selectedOption && !lastResult.is_correct && index !== question.correct_option && (
-              <span className="qc-feedback-icon qc-feedback-icon--wrong">✗</span>
-            )}
-          </button>
-        ))}
+        {question.options.map((option, index) => {
+          const position = marked.indexOf(index);
+          const correctPosition = correct.indexOf(index);
+          const isCorrect = type === 'order' ? position === correctPosition : correct.includes(index);
+
+          return (
+            <button
+              key={index}
+              className={getPillClass(index)}
+              onClick={() => handleTap(index)}
+              disabled={!inputOpen}
+              aria-pressed={type === 'single' ? undefined : position !== -1}
+            >
+              <span className="pill-num">{optionLabel(index)}</span>
+              <span className="qc-option-text">{option}</span>
+              {type === 'order' && position !== -1 && (
+                <span className="qc-seq" title={`Position ${position + 1}`}>{position + 1}</span>
+              )}
+              {type === 'order' && showVerdict && !isCorrect && (
+                <span className="qc-seq-fix" title="Its place in the correct order">→ {correctPosition + 1}</span>
+              )}
+              {/* Feedback icon */}
+              {showVerdict && type !== 'order' && isCorrect && (
+                <span className="qc-feedback-icon qc-feedback-icon--correct">✓</span>
+              )}
+              {showVerdict && type !== 'order' && !isCorrect && position !== -1 && (
+                <span className="qc-feedback-icon qc-feedback-icon--wrong">✗</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
+      {/* Multiple / order: the picks so far and the lock-in */}
+      {type !== 'single' && !locked && !disabled && (
+        <div className="qc-lock-row">
+          <span className="qc-lock-count">
+            {type === 'order'
+              ? `${draft.length} of ${optionCount} placed`
+              : `${draft.length} selected`}
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setDraft([])}
+            disabled={draft.length === 0 || submitting}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => submit(draft)}
+            disabled={!isAnswerComplete(type, draft, optionCount) || submitting}
+          >
+            Lock in
+          </button>
+        </div>
+      )}
+
       {/* Locked in, waiting on the countdown */}
-      {selectedOption !== null && !showVerdict && (
+      {locked && !showVerdict && (
         <div className="qc-locked-note">
           <span className="qc-locked-dot" />
-          Answer locked in — revealed when the timer ends
+          {type === 'order' ? 'Order' : 'Answer'} locked in — revealed when the timer ends
+        </div>
+      )}
+
+      {/* Time ran out with nothing locked in */}
+      {revealed && lastResult === null && !locked && (
+        <div className="qc-result qc-result--wrong">
+          <span className="qc-result-icon">⏱</span>
+          <div className="qc-result-text">
+            <strong>Time&rsquo;s up</strong>
+            <span className="qc-result-detail">
+              {draft.length > 0 ? 'Not locked in in time. ' : ''}
+              The correct {answerWord} was {formatAnswer(type, correct)}
+            </span>
+          </div>
         </div>
       )}
 
@@ -127,7 +223,7 @@ export default function QuestionCard({
             <span className="qc-result-detail">
               {lastResult.is_correct
                 ? `+${lastResult.points_awarded} points (${(lastResult.response_time_ms / 1000).toFixed(1)}s)`
-                : `The correct answer was ${OPTION_LABELS[question.correct_option]}`}
+                : `The correct ${answerWord} was ${formatAnswer(type, correct)}`}
             </span>
           </div>
         </div>
@@ -170,6 +266,90 @@ export default function QuestionCard({
           background: rgba(242,183,5,0.12);
           padding: 3px 10px;
           border-radius: var(--radius-pill);
+        }
+
+        /* R19 — which kind of question this is */
+        .qc-type {
+          font-family: 'Inter', sans-serif;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          padding: 3px 10px;
+          border-radius: var(--radius-pill);
+          border: 1px solid rgba(242,183,5,0.35);
+          color: var(--pale-gold);
+          white-space: nowrap;
+        }
+
+        .qc-type--multiple,
+        .qc-type--order {
+          border-color: var(--spotlight-gold);
+          color: var(--spotlight-gold);
+        }
+
+        .qc-hint {
+          margin: calc(var(--space-sm) * -1) 0 var(--space-md);
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          color: var(--pale-gold);
+        }
+
+        /* Picked but not locked in yet — multiple and order */
+        .qc-pill--picked {
+          border-color: var(--spotlight-gold) !important;
+          background: rgba(242,183,5,0.16) !important;
+          box-shadow: 0 0 0 1px var(--spotlight-gold);
+        }
+
+        .qc-seq {
+          flex-shrink: 0;
+          margin-left: auto;
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'Poppins', sans-serif;
+          font-size: 13px;
+          font-weight: 700;
+          background: var(--spotlight-gold);
+          color: var(--deep-midnight);
+        }
+
+        .qc-pill--locked .qc-seq,
+        .qc-pill--correct .qc-seq {
+          background: var(--deep-midnight);
+          color: var(--spotlight-gold);
+        }
+
+        .qc-pill--wrong .qc-seq {
+          background: rgba(255,255,255,0.2);
+          color: white;
+        }
+
+        .qc-seq-fix {
+          flex-shrink: 0;
+          font-family: 'Inter', sans-serif;
+          font-size: 12px;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .qc-lock-row {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: var(--space-sm);
+          margin-top: var(--space-md);
+          flex-wrap: wrap;
+        }
+
+        .qc-lock-count {
+          flex: 1;
+          font-family: 'Inter', sans-serif;
+          font-size: 13px;
+          color: var(--pale-gold);
         }
 
         .qc-pill {
@@ -369,6 +549,9 @@ export default function QuestionCard({
           .qc-header {
             flex-wrap: wrap;
           }
+
+          .qc-lock-row .btn { flex: 1; }
+          .qc-lock-count { flex-basis: 100%; }
         }
       `}</style>
     </div>

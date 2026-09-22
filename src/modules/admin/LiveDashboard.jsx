@@ -87,7 +87,8 @@ export default function LiveDashboard() {
     if (r2Data) setHotSeatId(r2Data.active_participant_id);
 
     // Fetch questions
-    const { data: qData } = await supabase.from('questions').select('*').eq('round', 1).order('order_index');
+    // R19 — Round 1 has its own table.
+    const { data: qData } = await supabase.from('round1_questions').select('*').order('order_index');
     if (qData) setQuestions(qData);
 
     // Fetch participants

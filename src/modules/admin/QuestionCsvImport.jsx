@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { toCsv } from './csv';
 import { TEMPLATE_ROWS, parseQuestionCsv, withOrderIndex, summariseRungs } from './questionCsv';
+import { QUESTION_TYPES, formatAnswer } from '../round1/answers';
 
 /**
  * Bulk question import.
@@ -109,37 +110,71 @@ export default function QuestionCsvImport({ onImported, onClose, showToast }) {
     let hasRungs = true;
     let { data: existing, error: readError } = await supabase
       .from('questions')
-      .select('round, order_index, ladder_level');
+      .select('round, order_index, ladder_level')
+      .eq('round', 2);
 
     if (readError && /ladder_level/i.test(readError.message)) {
       hasRungs = false;
       ({ data: existing, error: readError } = await supabase
         .from('questions')
-        .select('round, order_index'));
+        .select('round, order_index')
+        .eq('round', 2));
     }
 
-    if (readError) {
-      showToast(`Import failed: ${readError.message}`, 'error');
+    // R19 — Round 1 lives in its own table, which has no `round` column.
+    const { data: existing1, error: readError1 } = await supabase
+      .from('round1_questions')
+      .select('order_index');
+
+    if (readError || readError1) {
+      showToast(`Import failed: ${(readError || readError1).message}`, 'error');
       setImporting(false);
       return;
     }
 
-    const withRungs = withOrderIndex(parsed.rows, existing);
-    const payload = hasRungs
-      ? withRungs
-      : withRungs.map((r) => {
-          const stripped = { ...r };
-          delete stripped.ladder_level;
-          return stripped;
-        });
+    const ordered = withOrderIndex(parsed.rows, [
+      ...existing1.map((q) => ({ round: 1, order_index: q.order_index })),
+      ...existing,
+    ]);
 
-    const { error } = await supabase.from('questions').insert(payload);
+    const round1Rows = ordered
+      .filter((r) => r.round === 1)
+      .map((r) => {
+        const row = { ...r };
+        delete row.round;
+        return row;
+      });
+    const round2Rows = ordered
+      .filter((r) => r.round === 2)
+      .map((r) => {
+        if (hasRungs) return r;
+        const stripped = { ...r };
+        delete stripped.ladder_level;
+        return stripped;
+      });
+
+    // Two tables, so two inserts. If the second fails the first is taken back
+    // out: a half-imported question set is the thing this panel exists to
+    // prevent.
+    let error = null;
+    let inserted1 = [];
+    if (round1Rows.length) {
+      const res = await supabase.from('round1_questions').insert(round1Rows).select('id');
+      error = res.error;
+      inserted1 = res.data || [];
+    }
+    if (!error && round2Rows.length) {
+      ({ error } = await supabase.from('questions').insert(round2Rows));
+      if (error && inserted1.length) {
+        await supabase.from('round1_questions').delete().in('id', inserted1.map((q) => q.id));
+      }
+    }
 
     if (error) {
       showToast(`Import failed: ${error.message}`, 'error');
     } else {
       showToast(
-        `Imported ${payload.length} question${payload.length > 1 ? 's' : ''}` +
+        `Imported ${ordered.length} question${ordered.length > 1 ? 's' : ''}` +
         (hasRungs ? '' : ' — prize rungs were skipped, the database needs migration_v11')
       );
       reset();
@@ -167,7 +202,10 @@ export default function QuestionCsvImport({ onImported, onClose, showToast }) {
 
       <p className="qci-help">
         Required columns: <code>round</code>, <code>text</code>, <code>option_a</code>–<code>option_d</code>,{' '}
-        <code>correct</code> (A–D or 1–4). Optional: <code>base_points</code> (default 100),{' '}
+        <code>correct</code> (A–D or 1–4). Optional: <code>type</code> — Round 1 only:{' '}
+        <code>single</code> (the default), <code>multiple</code> with every correct option in{' '}
+        <code>correct</code> (<code>A,C</code>), or <code>order</code> with all four in the right
+        sequence (<code>B&gt;D&gt;A&gt;C</code>); <code>base_points</code> (default 100),{' '}
         <code>duration_s</code> (blank uses the round default), <code>prize</code>,{' '}
         <code>ladder_level</code> — Round 2's prize rung, also spelled{' '}
         <code>rung</code>, <code>tier</code> or <code>level</code>. Several questions
@@ -334,10 +372,19 @@ export default function QuestionCsvImport({ onImported, onClose, showToast }) {
                       <td>{r.round}</td>
                       <td className="qci-text-cell" title={r.text}>{r.text}</td>
                       <td>
-                        <span className="qci-correct">
-                          {String.fromCharCode(65 + r.correct_option)}
-                        </span>{' '}
-                        {r.options[r.correct_option]}
+                        {r.round === 1 && r.question_type !== 'single' ? (
+                          <>
+                            <span className="qci-correct">{formatAnswer(r.question_type, r.correct_answer)}</span>{' '}
+                            {QUESTION_TYPES[r.question_type].short}
+                          </>
+                        ) : (
+                          <>
+                            <span className="qci-correct">
+                              {String.fromCharCode(65 + (r.correct_option ?? r.correct_answer[0]))}
+                            </span>{' '}
+                            {r.options[r.correct_option ?? r.correct_answer[0]]}
+                          </>
+                        )}
                       </td>
                       <td>{r.base_points}</td>
                       <td>{r.duration_ms != null ? `${r.duration_ms / 1000}s` : 'default'}</td>

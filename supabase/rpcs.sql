@@ -100,6 +100,11 @@ BEGIN
   -- 1. Look up the question
   SELECT * INTO v_question FROM questions WHERE id = p_question_id;
   IF NOT FOUND THEN
+    -- Round 1 questions live in round1_questions and are answered through
+    -- submit_round1_response. (R19)
+    IF EXISTS (SELECT 1 FROM round1_questions WHERE id = p_question_id) THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Round 1 answers go through submit_round1_response');
+    END IF;
     RETURN jsonb_build_object('success', false, 'error', 'Question not found');
   END IF;
 
@@ -200,6 +205,133 @@ BEGIN
     'success', true,
     'response_id', v_response_id,
     'is_correct', v_is_correct,
+    'points_awarded', v_points,
+    'response_time_ms', v_response_time
+  );
+END;
+$$;
+
+
+-- ─── submit_round1_response ─────────────────────────────────
+-- R19 — Round 1's answer, for any of its three question types. `p_answer`
+-- is a JSON array of 0-based option indices: [i] for single-correct, the
+-- picked set for multiple-correct, the full sequence for choose-the-order.
+--
+-- Same timing, duplicate and "is this the live question" rules as
+-- submit_response; the difference is only in what an answer is. It is
+-- normalised with round1_normalize_answer — the same function the table's
+-- CHECK holds correct_answer to — so correctness is a plain equality, and
+-- all-or-nothing: a set with one option missing, or a sequence with two
+-- items swapped, scores zero.
+CREATE OR REPLACE FUNCTION submit_round1_response(
+  p_participant_id   UUID,
+  p_question_id      UUID,
+  p_answer           JSONB,
+  p_response_time_ms INT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_question            RECORD;
+  v_round_state         RECORD;
+  v_current_question_id UUID;
+  v_answer              JSONB;
+  v_is_correct          BOOLEAN;
+  v_response_time       INT;
+  v_duration            INT;
+  v_time_points         NUMERIC;
+  v_points              INT;
+  v_response_id         UUID;
+BEGIN
+  SELECT * INTO v_question FROM round1_questions WHERE id = p_question_id;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Question not found');
+  END IF;
+
+  SELECT * INTO v_round_state FROM round_state WHERE round = 1;
+  IF NOT FOUND OR v_round_state.status != 'active' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Round is not active');
+  END IF;
+
+  v_duration := COALESCE(v_question.duration_ms, v_round_state.question_duration_ms, 10000);
+
+  SELECT id INTO v_current_question_id
+  FROM round1_questions
+  WHERE order_index = v_round_state.current_question_index
+  LIMIT 1;
+
+  IF v_current_question_id IS NULL OR v_current_question_id != p_question_id THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Question is not current');
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM responses
+    WHERE participant_id = p_participant_id AND question_id = p_question_id
+  ) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Already answered');
+  END IF;
+
+  v_answer := round1_normalize_answer(
+    v_question.question_type,
+    jsonb_array_length(v_question.options),
+    p_answer
+  );
+  IF v_answer IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'That answer does not fit this question');
+  END IF;
+
+  -- Client-measured and clamped, or the server clock as a fallback — as in
+  -- submit_response. (R6, ISSUES 1.1 / 1.7)
+  IF p_response_time_ms IS NOT NULL THEN
+    v_response_time := LEAST(GREATEST(p_response_time_ms, 0), v_duration);
+  ELSIF v_round_state.question_started_at IS NULL THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'Question has no start time — ask the host to re-serve this question'
+    );
+  ELSE
+    v_response_time := LEAST(
+      GREATEST((EXTRACT(EPOCH FROM (now() - v_round_state.question_started_at)) * 1000)::INT, 0),
+      v_duration
+    );
+  END IF;
+
+  v_is_correct := (v_answer = v_question.correct_answer);
+
+  IF v_is_correct THEN
+    v_time_points := v_question.base_points
+                     * GREATEST(0, v_duration - v_response_time)::NUMERIC
+                     / NULLIF(v_duration, 0);
+    v_points := ROUND(v_question.base_points + COALESCE(v_time_points, 0))::INT;
+  ELSE
+    v_points := 0;
+  END IF;
+
+  BEGIN
+    INSERT INTO responses (
+      participant_id, question_id, round, selected_option, answer,
+      is_correct, response_time_ms, points_awarded
+    )
+    VALUES (
+      p_participant_id, p_question_id, 1,
+      -- Filled for single-correct so anything reading selected_option still works.
+      CASE WHEN v_question.question_type = 'single' THEN (v_answer->>0)::INT END,
+      v_answer, v_is_correct, v_response_time, v_points
+    )
+    RETURNING id INTO v_response_id;
+  EXCEPTION WHEN unique_violation THEN
+    -- Two taps racing past the EXISTS check above.
+    RETURN jsonb_build_object('success', false, 'error', 'Already answered');
+  END;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'response_id', v_response_id,
+    'is_correct', v_is_correct,
+    'answer', v_answer,
     'points_awarded', v_points,
     'response_time_ms', v_response_time
   );
@@ -399,12 +531,13 @@ BEGIN
   END IF;
 
   -- Next question by order_index, not by array position. (ISSUES 1.4)
+  -- round_questions: round 1 lives in its own table. (R19)
   SELECT MIN(order_index) INTO v_next_order
-  FROM questions
+  FROM round_questions
   WHERE round = p_round AND order_index > v_current_index;
 
   SELECT MAX(order_index) INTO v_max_order
-  FROM questions
+  FROM round_questions
   WHERE round = p_round;
 
   -- No questions at all, or nothing after the current one → completed.
@@ -478,7 +611,7 @@ DECLARE
   v_rows_updated INT;
   v_cleared      INT := 0;
 BEGIN
-  SELECT * INTO v_question FROM questions WHERE id = p_question_id;
+  SELECT * INTO v_question FROM round_questions WHERE id = p_question_id;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', false, 'error', 'Question not found');
   END IF;
@@ -615,7 +748,7 @@ BEGIN
   END IF;
 
   SELECT COALESCE(MIN(order_index), 0) INTO v_first_index
-  FROM questions WHERE round = p_round;
+  FROM round_questions WHERE round = p_round;
 
   UPDATE round_state
   SET status                 = 'inactive',
@@ -757,7 +890,7 @@ DECLARE
 BEGIN
   SELECT COUNT(*), MIN(order_index)
     INTO v_question_count, v_first_index
-  FROM questions WHERE round = p_round;
+  FROM round_questions WHERE round = p_round;
 
   -- Starting an empty round leaves participants on a permanent
   -- "waiting for next question" screen. (ISSUES 2.7)
@@ -801,15 +934,27 @@ AS $$
 DECLARE
   v_updated INT := 0;
 BEGIN
-  WITH ordered AS (
-    SELECT id, ROW_NUMBER() OVER (ORDER BY order_index, created_at) - 1 AS new_index
-    FROM questions
-    WHERE round = p_round
-  )
-  UPDATE questions q
-  SET order_index = o.new_index
-  FROM ordered o
-  WHERE q.id = o.id AND q.order_index IS DISTINCT FROM o.new_index;
+  IF p_round = 1 THEN
+    -- Round 1 has its own table. (R19)
+    WITH ordered AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY order_index, created_at) - 1 AS new_index
+      FROM round1_questions
+    )
+    UPDATE round1_questions q
+    SET order_index = o.new_index
+    FROM ordered o
+    WHERE q.id = o.id AND q.order_index IS DISTINCT FROM o.new_index;
+  ELSE
+    WITH ordered AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY order_index, created_at) - 1 AS new_index
+      FROM questions
+      WHERE round = p_round
+    )
+    UPDATE questions q
+    SET order_index = o.new_index
+    FROM ordered o
+    WHERE q.id = o.id AND q.order_index IS DISTINCT FROM o.new_index;
+  END IF;
 
   GET DIAGNOSTICS v_updated = ROW_COUNT;
 

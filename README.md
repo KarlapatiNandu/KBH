@@ -443,3 +443,34 @@ settings, then deploy `dist/`.
 > publishable by design, but adding `.env` to `.gitignore` and running
 > `git rm --cached .env` is the habit worth keeping before a service-role key
 > ever lands in there.
+
+**Round 1 question types (R19):** run `supabase/migration_v13.sql`, then re-run
+`supabase/rpcs.sql`. Round 1 now has its own table, `round1_questions`, and
+three kinds of question:
+
+- **Single correct** — tap one option; it locks in, as before.
+- **Multiple correct** — tap every correct option (tap again to unpick), then
+  **Lock in**. All-or-nothing: one missed or extra option scores zero.
+- **Choose the right order** — tap the options in sequence; each shows its
+  place, and tapping a placed option takes it back out. **Lock in** once all of
+  them are placed. Any item out of place scores zero. After the reveal, each
+  wrong item shows where it belonged.
+
+The answer key is `correct_answer`, a JSON array of 0-based option indices:
+`[2]`, the set `[0, 3]`, or the full sequence `[1, 3, 0, 2]`. Options are shown
+to participants in the order they were entered, so type an order question's
+options jumbled. In the Questions tab, pick the **Type** for a Round 1 question;
+the button beside each option marks the key (✓ for single/multiple, **+** in
+the correct order for order questions). In a CSV, add a `type` column (`single`
+is the default) and write `correct` as `A,C` for multiple or `B>D>A>C` for
+order. Round 2 stays single-correct only, since its lifelines assume one right
+answer.
+
+- The migration moves existing Round 1 questions across as *single*, keeping
+  their ids, so responses already recorded still line up. `questions` becomes
+  Round 2 only.
+- Answers go through the new `submit_round1_response` RPC. `responses` gains an
+  `answer` column, and its foreign key to `questions` is replaced by delete
+  triggers, which clean up responses the same way for both tables.
+- Don't re-run `migration_v2.sql` after this: it re-adds that foreign key, which
+  Round 1 responses no longer satisfy.
